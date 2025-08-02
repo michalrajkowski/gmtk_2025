@@ -12,7 +12,7 @@ class LevelBase(ABC):
     start_room: str = "A"
     completed: bool = False
     max_cursors: int = 10
-    loop_seconds: int = 5
+    loop_seconds: int = 10
 
     @abstractmethod
     def reset_level(self) -> None: ...

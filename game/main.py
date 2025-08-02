@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Final, List, Dict
+from typing import Final, Dict
 import pyxel
 
 from game.levels.level_base import LevelBase
@@ -9,6 +9,8 @@ from game.levels.level_rooms_demo import LevelRoomsDemo
 from game.scenes.level_select import LevelEntry, LevelSelectScene
 from game.scenes.gameplay import GameplayScene
 from game.scenes.level_finished import LevelFinishedScene
+from game.levels.level_switch_lock import LevelSwitchLock
+from game.levels.level_button_lock import LevelButtonLock
 
 WIDTH: Final[int] = 300
 HEIGHT: Final[int] = 200
@@ -33,8 +35,10 @@ class Game:
         pyxel.init(WIDTH, HEIGHT, title=TITLE, fps=FPS)
         pyxel.mouse(False)
 
-        self._entries: List[LevelEntry] = [
-            LevelEntry(factory=LevelFlagOnly),  # Level 0: just the flag
+        self._entries = [
+            LevelEntry(factory=LevelFlagOnly),  # 0
+            LevelEntry(factory=LevelSwitchLock),  # 1
+            LevelEntry(factory=LevelButtonLock),  # 2  <- NEW
             LevelEntry(factory=LevelPads),
             LevelEntry(factory=LevelRoomsDemo),
         ]

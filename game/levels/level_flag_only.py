@@ -12,6 +12,7 @@ class LevelFlagOnly(LevelBase):
     difficulty: int = 0
     start_room: str = "A"
     max_cursors = 1
+    loop_seconds: int = 10
 
     def __init__(self) -> None:
         self._flag = Flag(x=300 // 2 - 16, y=200 // 2, w=24, h=24)

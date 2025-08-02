@@ -79,6 +79,13 @@ class GameplayScene:
         self._consume_and_start_new_loop()
 
     # ----- lifecycle -----
+    def _restart_full(self) -> None:
+        """Completely restart the level: reset level state, ghosts, and lives."""
+        self._timelines.reset_all()
+        self._level.reset_level()
+        self._cursors_left = self._max_cursors
+        self._consume_and_start_new_loop()  # starts fresh loop and arms overlays
+
     def _start_new_loop_core(self) -> None:
         self._level.on_loop_start()
         self._timelines.start_run()
@@ -214,7 +221,7 @@ class GameplayScene:
                         self._exit_to_menu()
                         return True
                     if key == "restart":
-                        self._restart_discard_current()
+                        self._restart_full()
                         return True
                     if key == "pass":
                         self._commit_and_start_next()
@@ -233,7 +240,7 @@ class GameplayScene:
             self._exit_to_menu()
             return
         if pyxel.btnp(self.KEY_RESTART):
-            self._restart_discard_current()
+            self._restart_full()
             return
         if pyxel.btnp(self.KEY_PASS) or pyxel.btnp(self.KEY_COMMIT_ALT):
             self._commit_and_start_next()
