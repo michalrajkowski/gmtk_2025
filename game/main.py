@@ -8,7 +8,7 @@ from game.levels.level_rooms_demo import LevelRoomsDemo
 from game.scenes.level_select import LevelEntry, LevelSelectScene
 from game.scenes.gameplay import GameplayScene
 
-WIDTH: Final[int] = 200
+WIDTH: Final[int] = 300
 HEIGHT: Final[int] = 200
 FPS: Final[int] = 30
 LOOP_SECONDS: Final[int] = 20
