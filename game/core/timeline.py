@@ -10,8 +10,8 @@ class FrameRecord:
     y: int
     left_p: bool
     right_p: bool
-    left_h: bool  # held this frame
-    right_h: bool  # held this frame
+    left_h: bool
+    right_h: bool
 
 
 @dataclass(slots=True)
@@ -42,13 +42,10 @@ class Timeline:
         return None
 
 
-# A little alias so we can annotate self-referential lists neatly
 TIMELINE = Timeline
 
 
 class TimelineManager:
-    """Owns all past runs + the in-progress recording, and provides ghost samples."""
-
     _GHOST_COLORS: Final[tuple[int, ...]] = (12, 10, 11, 14, 8)
 
     def __init__(self, max_frames: int) -> None:
@@ -57,7 +54,6 @@ class TimelineManager:
         self._current: Optional[Timeline] = None
         self.player_pos: Tuple[int, int] = (80, 60)
 
-    # Run lifecycle
     def start_run(self) -> None:
         self._current = Timeline(self.max_frames)
 
@@ -74,7 +70,6 @@ class TimelineManager:
         self._current = None
         self.player_pos = (80, 60)
 
-    # Recording
     def record_frame(
         self, x: int, y: int, left_p: bool, right_p: bool, left_h: bool, right_h: bool
     ) -> None:
@@ -82,7 +77,6 @@ class TimelineManager:
         if self._current is not None:
             self._current.record(x, y, left_p, right_p, left_h, right_h)
 
-    # Ghost sampling
     def ghosts_for_frame(self, frame_index: int) -> List[GhostSample]:
         samples: List[GhostSample] = []
         for idx, tl in enumerate(self.past_runs):

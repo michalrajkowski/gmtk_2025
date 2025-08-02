@@ -10,7 +10,8 @@ class LevelBase(ABC):
     name: str = "Level"
     difficulty: int = 1
     start_room: str = "A"
-    completed: bool = False  # set true by Flag
+    completed: bool = False
+    max_cursors: int = 10  # NEW: default lives/cursors
 
     @abstractmethod
     def reset_level(self) -> None: ...

@@ -11,6 +11,7 @@ class LevelFlagOnly(LevelBase):
     name: str = "Intro"
     difficulty: int = 0
     start_room: str = "A"
+    max_cursors = 1
 
     def __init__(self) -> None:
         self._flag = Flag(x=120, y=80, w=24, h=24)

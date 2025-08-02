@@ -15,6 +15,7 @@ class LevelRoomsDemo(LevelBase):
     name: str = "MultiRoom"
     difficulty: int = 1
     start_room: str = "A"
+    max_cursors = 5
 
     def __init__(self) -> None:
         self._rooms: Dict[str, List[LevelObject]] = {"A": [], "B": []}
