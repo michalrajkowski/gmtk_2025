@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Callable, Final, List
 import random
+import math
 import pyxel
 
 
@@ -25,21 +26,27 @@ class _Particle:
         self.radius = radius
 
     def update(self) -> bool:
-        # simple physics
+        # physics: gravity + mild drag for a pleasing arc
+        self.vy += 0.08  # gravity (pull down)
+        self.vx *= 0.995  # slight drag
+        self.vy *= 0.995
+
         self.x += self.vx
         self.y += self.vy
-        self.vy += 0.05  # gravity
+
         self.age += 1
         return self.age < self.max_age
 
     def draw(self) -> None:
-        # fade radius over time
-        r = max(1, int(self.radius * (1.0 - self.age / self.max_age)))
-        if r <= 1:
-            if 0 <= int(self.x) < pyxel.width and 0 <= int(self.y) < pyxel.height:
-                pyxel.pset(int(self.x), int(self.y), self.color)
-        else:
-            pyxel.circ(int(self.x), int(self.y), r, self.color)
+        # shrink over life; switch to pixel at the end for sparkle
+        t = self.age / self.max_age
+        r = max(1, int(self.radius * (1.0 - t)))
+        ix, iy = int(self.x), int(self.y)
+        if 0 <= ix < pyxel.width and 0 <= iy < pyxel.height:
+            if r <= 1:
+                pyxel.pset(ix, iy, self.color)
+            else:
+                pyxel.circ(ix, iy, r, self.color)
 
 
 class LevelFinishedScene:
@@ -47,36 +54,41 @@ class LevelFinishedScene:
         self._name = level_name
         self._on_done = on_done
         self._timer = 0
-        self._wait_frames: Final[int] = 60  # ~2s at 30fps
+        self._wait_frames: Final[int] = 600  # ~2s at 30fps
 
         self._parts: List[_Particle] = []
         self._spawn_cooldown = 0
 
     def _spawn_firework(self) -> None:
-        # random position with some top margin (avoid nav overlap if any)
-        x = random.randint(20, pyxel.width - 20)
-        y = random.randint(24, pyxel.height - 20)
+        # Pick a random center (keep away from edges a bit)
+        cx = random.randint(24, pyxel.width - 24)
+        cy = random.randint(28, pyxel.height - 24)
 
-        # choose a bright color palette
-        base_colors = [7, 8, 9, 10, 11, 12, 13, 14]
-        color = random.choice(base_colors)
+        # Base parameters
+        n = random.randint(22, 36)  # number of spokes
+        base_speed = random.uniform(1.3, 2.4)  # initial radial speed
+        max_age = random.randint(22, 34)  # particle lifetime
+        radius0 = random.randint(2, 4)  # initial draw radius
+        palette = [7, 8, 9, 10, 11, 12, 13, 14]
+        base_color = random.choice(palette)
 
-        count = random.randint(22, 36)
-        speed = random.uniform(1.0, 2.6)
-        max_age = random.randint(20, 36)
-        radius0 = random.randint(2, 4)
+        # Create a circular ring of particles with slight jitter
+        for i in range(n):
+            theta = (2.0 * math.pi * i / n) + random.uniform(-0.06, 0.06)
+            spd = base_speed * random.uniform(0.9, 1.1)
+            vx = spd * math.cos(theta)
+            vy = spd * math.sin(theta)
+            color = base_color if random.random() < 0.7 else random.choice(palette)
+            pr = radius0 if random.random() < 0.75 else max(1, radius0 - 1)
+            self._parts.append(_Particle(cx, cy, vx, vy, color, max_age, pr))
 
-        for i in range(count):
-            ang = random.uniform(0, 6.28318)
-            spd = speed * random.uniform(0.6, 1.2)
-            vx = spd * pyxel.cos(ang)
-            vy = spd * pyxel.sin(ang) * -1  # bias upward a bit
-            c = color if random.random() < 0.75 else random.choice(base_colors)
-            r = radius0 if random.random() < 0.7 else max(1, radius0 - 1)
-            self._parts.append(_Particle(x, y, vx, vy, c, max_age, r))
+        # Core flash: short-lived bright puff at the center
+        flash_color = random.choice(palette)
+        for _ in range(6):
+            self._parts.append(_Particle(cx, cy, 0.0, 0.0, flash_color, 8, radius0 + 1))
 
-        # schedule next burst
-        self._spawn_cooldown = random.randint(6, 14)
+        # Next burst after a short random delay
+        self._spawn_cooldown = random.randint(8, 14)
 
     def update(self) -> None:
         self._timer += 1
@@ -100,6 +112,8 @@ class LevelFinishedScene:
 
     def draw(self) -> None:
         pyxel.cls(1)
+
+        # fireworks behind text
         for p in self._parts:
             p.draw()
 

@@ -45,6 +45,32 @@ class LevelSelectScene:
         tx = x + (w - tw) // 2
         pyxel.text(tx, y, text, col)
 
+    def _draw_difficulty_row(self, x: int, w: int, y: int, diff: int) -> None:
+        """
+        Draw 'O O O' with colors based on difficulty:
+          0 -> gray gray gray
+          1 -> green gray gray
+          2 -> yellow yellow gray
+          3 -> red red red
+        """
+        # Colors: gray=5, green=11, yellow=10, red=8
+        if diff <= 0:
+            cols = [5, 5, 5]
+        elif diff == 1:
+            cols = [11, 5, 5]
+        elif diff == 2:
+            cols = [10, 10, 5]
+        else:
+            cols = [8, 8, 8]
+
+        # Center "O O O" (3 glyphs + 2 spaces -> 5 chars * 4px = 20px)
+        total_w = 20
+        start_x = x + (w - total_w) // 2
+        # Draw each 'O' separately so each can have its own color
+        for i, col in enumerate(cols):
+            px = start_x + i * 8  # 4px char + 4px space
+            pyxel.text(px, y, "O", col)
+
     def update(self) -> None:
         if pyxel.btnp(pyxel.KEY_Q):
             pyxel.quit()
@@ -68,13 +94,21 @@ class LevelSelectScene:
             x, y, w, h = self._slot_rect(i)
             done = self._is_completed(meta.name)
 
-            pyxel.rect(x, y, w, h, 11 if done else 0)  # green if completed
+            pyxel.rect(x, y, w, h, 11 if done else 0)  # green background if completed
             pyxel.rectb(x, y, w, h, 7)
 
+            # Number in the square
             self._center_text(x, w, y + h // 2 - 3, str(i + 1), 7)
-            label = f"{meta.name} ({meta.difficulty})"
-            self._center_text(x, w, y + h + 6, label, 6)
 
+            # Name under the square
+            self._center_text(x, w, y + h + 6, f"{meta.name}", 6)
+
+            # Difficulty row under the name
+            self._draw_difficulty_row(
+                x, w, y + h + 12, int(getattr(meta, "difficulty", 0))
+            )
+
+        # Custom pointer
         mx = max(0, min(self._w - 1, int(pyxel.mouse_x)))
         my = max(0, min(self._h - 1, int(pyxel.mouse_y)))
         self._draw_pointer(int(mx), int(my), int(7), int(0))

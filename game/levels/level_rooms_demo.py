@@ -13,7 +13,7 @@ from game.objects.button import Button
 
 class LevelRoomsDemo(LevelBase):
     name: str = "MultiRoom"
-    difficulty: int = 1
+    difficulty: int = 2
     start_room: str = "A"
     max_cursors = 5
 
