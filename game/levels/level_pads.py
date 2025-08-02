@@ -3,14 +3,14 @@ from typing import Final, List, Optional
 
 from game.levels.level_base import LevelBase
 from game.core.cursor import CursorEvent
-from game.objects.base import Which
+from game.objects.base import Which, Action
 from game.objects.click_pad import ClickPad
 
 
 class LevelPads(LevelBase):
     name: str = "Pads"
     difficulty: int = 1
-    start_room: str = "A"  # required by the new flow, though unused here
+    start_room: str = "A"
 
     PAD_W: Final[int] = 36
     PAD_H: Final[int] = 24
@@ -19,7 +19,7 @@ class LevelPads(LevelBase):
 
     def __init__(self) -> None:
         left = 8
-        top = 20
+        top = 24  # leave room for nav bar (16px) + gap
         w = self.PAD_W
         h = self.PAD_H
         gx = self.GAP_X
@@ -32,21 +32,18 @@ class LevelPads(LevelBase):
             ClickPad(left + w + gx, top + h + gy, w, h, threshold=100, color=6),
         ]
 
-    # --- New LevelBase API ---
     def interact(
-        self, which: Which, x: int, y: int, room_id: str
+        self, which: Which, action: Action, x: int, y: int, room_id: str
     ) -> Optional[CursorEvent]:
-        # Pads has no rooms: ignore room_id, just apply the click.
-        for p in self.pads:
-            p.handle_click(which, x, y)
+        if action == "press":
+            for p in self.pads:
+                p.handle_click(which, x, y)
         return None
 
     def draw_room(self, room_id: str) -> None:
-        # Pads has no rooms: draw all pads.
         for p in self.pads:
             p.draw()
 
-    # --- Lifecycle ---
     def reset_level(self) -> None:
         for p in self.pads:
             p.reset()

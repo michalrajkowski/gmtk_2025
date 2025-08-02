@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Callable, Sequence, Tuple
+from typing import Callable, Sequence, Tuple, Optional
 
 import pyxel
 from game.levels.level_base import LevelBase
@@ -19,19 +19,19 @@ class LevelSelectScene:
         draw_pointer: Callable[[int, int, int, int], None],
         width: int,
         height: int,
+        is_completed: Optional[Callable[[str], bool]] = None,
     ) -> None:
         self._entries = list(entries)
         self._start_level = start_level
         self._draw_pointer = draw_pointer
         self._w = width
         self._h = height
+        self._is_completed = is_completed or (lambda _name: False)
 
-        # --- Horizontal row ---
         self._tile = 32
         self._gap = 8
         self._top = 24
 
-        # compute left offset to center the row
         total_w = len(self._entries) * self._tile + (len(self._entries) + 1) * self._gap
         self._left = max(0, (self._w - total_w) // 2)
 
@@ -50,7 +50,6 @@ class LevelSelectScene:
             pyxel.quit()
             return
 
-        # clamp mouse
         mx = max(0, min(self._w - 1, int(pyxel.mouse_x)))
         my = max(0, min(self._h - 1, int(pyxel.mouse_y)))
 
@@ -62,22 +61,20 @@ class LevelSelectScene:
                     return
 
     def draw(self) -> None:
-        pyxel.cls(1)  # background color 1
+        pyxel.cls(1)
 
         for i, entry in enumerate(self._entries):
             meta = entry.factory()
             x, y, w, h = self._slot_rect(i)
+            done = self._is_completed(meta.name)
 
-            pyxel.rect(x, y, w, h, 0)
+            pyxel.rect(x, y, w, h, 11 if done else 0)  # green if completed
             pyxel.rectb(x, y, w, h, 7)
 
-            # number
             self._center_text(x, w, y + h // 2 - 3, str(i + 1), 7)
-            # name (difficulty) under the square
             label = f"{meta.name} ({meta.difficulty})"
             self._center_text(x, w, y + h + 6, label, 6)
 
-        # draw custom pointer
         mx = max(0, min(self._w - 1, int(pyxel.mouse_x)))
         my = max(0, min(self._h - 1, int(pyxel.mouse_y)))
         self._draw_pointer(int(mx), int(my), int(7), int(0))

@@ -5,6 +5,7 @@ from typing import Literal, Optional, Tuple
 from game.core.cursor import CursorEvent
 
 Which = Literal["L", "R"]
+Action = Literal["press", "hold"]
 
 
 class LevelObject(ABC):
@@ -17,8 +18,8 @@ class LevelObject(ABC):
     def reset(self) -> None: ...
 
     # Returns: (spawned_object, cursor_event)
-    def handle_click(
-        self, which: Which, px: int, py: int
+    def handle_input(
+        self, which: Which, action: Action, px: int, py: int
     ) -> Tuple[Optional["LevelObject"], Optional[CursorEvent]]:
         return None, None
 

@@ -1,12 +1,14 @@
 from __future__ import annotations
-from typing import Final, List
+from typing import Final, List, Dict
 import pyxel
 
 from game.levels.level_base import LevelBase
+from game.levels.level_flag_only import LevelFlagOnly
 from game.levels.level_pads import LevelPads
 from game.levels.level_rooms_demo import LevelRoomsDemo
 from game.scenes.level_select import LevelEntry, LevelSelectScene
 from game.scenes.gameplay import GameplayScene
+from game.scenes.level_finished import LevelFinishedScene
 
 WIDTH: Final[int] = 300
 HEIGHT: Final[int] = 200
@@ -32,10 +34,20 @@ class Game:
         pyxel.mouse(False)
 
         self._entries: List[LevelEntry] = [
+            LevelEntry(factory=LevelFlagOnly),  # Level 0: just the flag
             LevelEntry(factory=LevelPads),
-            LevelEntry(factory=LevelRoomsDemo),  # <— multi-room demo
+            LevelEntry(factory=LevelRoomsDemo),
         ]
+        self._completed: Dict[str, bool] = {}
         self._show_menu()
+
+    def _is_completed(self, name: str) -> bool:
+        return self._completed.get(name, False)
+
+    def _mark_completed_and_finish(self, level_name: str) -> None:
+        self._completed[level_name] = True
+        # show "level finished" screen, then return to menu
+        self._scene = LevelFinishedScene(level_name, on_done=self._show_menu)
 
     def _show_menu(self) -> None:
         self._scene = LevelSelectScene(
@@ -44,9 +56,12 @@ class Game:
             draw_pointer=_draw_pointer,
             width=WIDTH,
             height=HEIGHT,
+            is_completed=self._is_completed,
         )
 
     def _start_level(self, level: LevelBase) -> None:
+        # Reset the level when entering from menu
+        level.reset_level()
         self._scene = GameplayScene(
             level=level,
             draw_pointer=_draw_pointer,
@@ -54,7 +69,8 @@ class Game:
             height=HEIGHT,
             fps=FPS,
             loop_seconds=LOOP_SECONDS,
-            exit_to_menu=self._show_menu,  # <— back button target
+            exit_to_menu=self._show_menu,
+            on_level_completed=self._mark_completed_and_finish,
         )
 
     def update(self) -> None:

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 import pyxel
-from game.objects.base import LevelObject, Which
+from game.objects.base import LevelObject, Which, Action
 
 
 @dataclass(slots=True)
@@ -24,7 +24,9 @@ class Box(LevelObject):
         self.clicks = 0
         self.destroyed = False
 
-    def handle_click(self, which: Which, px: int, py: int):
+    def handle_input(self, which: Which, action: Action, px: int, py: int):
+        if action != "press":
+            return None, None
         if self.destroyed or not self.contains(px, py):
             return None, None
         self.clicks += 1

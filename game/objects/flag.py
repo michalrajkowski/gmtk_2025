@@ -1,36 +1,33 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 
 import pyxel
-from game.core.cursor import CursorEvent
 from game.objects.base import LevelObject, Which, Action
 
 
 @dataclass(slots=True)
-class Door(LevelObject):
+class Flag(LevelObject):
     x: int
     y: int
     w: int
     h: int
-    target_room: str
-    color: int = 9
+    color: int = 10  # yellow/golden
     border: int = 7
-    label: str = "Door"
-    # Spawn point kept for compat; we currently don't teleport on enter
-    spawn_at: Optional[Tuple[int, int]] = None
-    on_enter: Optional[Callable[[str], None]] = None
+    label: str = "FLAG"
+    on_finish: Optional[Callable[[], None]] = None
 
     def reset(self) -> None:
-        return None
+        pass
 
     def handle_input(self, which: Which, action: Action, px: int, py: int):
         if action != "press":
             return None, None
         if not self.contains(px, py):
             return None, None
-        # Only change room; do not teleport pointer
-        return None, CursorEvent(room=self.target_room, teleport_to=None)
+        if self.on_finish:
+            self.on_finish()
+        return None, None
 
     def draw(self) -> None:
         pyxel.rect(self.x, self.y, self.w, self.h, self.color)
