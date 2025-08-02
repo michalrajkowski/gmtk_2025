@@ -1,13 +1,16 @@
 from __future__ import annotations
-from typing import Final, List
+from typing import Final, List, Optional
 
 from game.levels.level_base import LevelBase
+from game.core.cursor import CursorEvent
+from game.objects.base import Which
 from game.objects.click_pad import ClickPad
 
 
 class LevelPads(LevelBase):
     name: str = "Pads"
     difficulty: int = 1
+    start_room: str = "A"  # required by the new flow, though unused here
 
     PAD_W: Final[int] = 36
     PAD_H: Final[int] = 24
@@ -29,6 +32,21 @@ class LevelPads(LevelBase):
             ClickPad(left + w + gx, top + h + gy, w, h, threshold=100, color=6),
         ]
 
+    # --- New LevelBase API ---
+    def interact(
+        self, which: Which, x: int, y: int, room_id: str
+    ) -> Optional[CursorEvent]:
+        # Pads has no rooms: ignore room_id, just apply the click.
+        for p in self.pads:
+            p.handle_click(which, x, y)
+        return None
+
+    def draw_room(self, room_id: str) -> None:
+        # Pads has no rooms: draw all pads.
+        for p in self.pads:
+            p.draw()
+
+    # --- Lifecycle ---
     def reset_level(self) -> None:
         for p in self.pads:
             p.reset()
@@ -36,15 +54,3 @@ class LevelPads(LevelBase):
     def on_loop_start(self) -> None:
         for p in self.pads:
             p.reset()
-
-    def handle_left_click(self, x: int, y: int) -> None:
-        for p in self.pads:
-            p.handle_click("L", x, y)
-
-    def handle_right_click(self, x: int, y: int) -> None:
-        for p in self.pads:
-            p.handle_click("R", x, y)
-
-    def draw(self) -> None:
-        for p in self.pads:
-            p.draw()
