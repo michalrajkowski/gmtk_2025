@@ -10,7 +10,7 @@ from typing import Final
 import pyxel
 
 from game.core.timeline import GhostSample, TimelineManager
-from game.levels.level_one import LevelOne
+from game.levels.level_pads import LevelPads
 
 WIDTH: Final[int] = 160
 HEIGHT: Final[int] = 120
@@ -32,7 +32,7 @@ class Game:
         pyxel.mouse(True)
 
         self.timelines: TimelineManager = TimelineManager(max_frames=LOOP_FRAMES)
-        self.level: LevelOne = LevelOne()
+        self.level: LevelPads = LevelPads()
 
         # Simulation tick we write/advance in update()
         self.tick: int = 0
