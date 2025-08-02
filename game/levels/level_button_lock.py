@@ -10,7 +10,7 @@ from game.objects.button import Button
 
 
 class LevelButtonLock(LevelBase):
-    name: str = "Hold the Button!"
+    name: str = "Hold Button!"
     difficulty: int = 1
     start_room: str = "A"
     max_cursors: int = 2

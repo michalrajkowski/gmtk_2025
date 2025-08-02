@@ -11,6 +11,7 @@ from game.scenes.gameplay import GameplayScene
 from game.scenes.level_finished import LevelFinishedScene
 from game.levels.level_switch_lock import LevelSwitchLock
 from game.levels.level_button_lock import LevelButtonLock
+from game.levels.level_four_hold_lock import LevelFourHoldLock
 
 WIDTH: Final[int] = 300
 HEIGHT: Final[int] = 200
@@ -36,9 +37,10 @@ class Game:
         pyxel.mouse(False)
 
         self._entries = [
-            LevelEntry(factory=LevelFlagOnly),  # 0
-            LevelEntry(factory=LevelSwitchLock),  # 1
-            LevelEntry(factory=LevelButtonLock),  # 2  <- NEW
+            LevelEntry(factory=LevelFlagOnly),
+            LevelEntry(factory=LevelSwitchLock),
+            LevelEntry(factory=LevelButtonLock),
+            LevelEntry(factory=LevelFourHoldLock),
             LevelEntry(factory=LevelPads),
             LevelEntry(factory=LevelRoomsDemo),
         ]

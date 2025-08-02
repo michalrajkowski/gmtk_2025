@@ -29,15 +29,20 @@ class LevelSelectScene:
         self._is_completed = is_completed or (lambda _name: False)
 
         self._tile = 32
-        self._gap = 8
+        self._gap = 16
         self._top = 24
+        self._cols = 6
 
-        total_w = len(self._entries) * self._tile + (len(self._entries) + 1) * self._gap
+        total_w = self._cols * self._tile + (self._cols + 1) * self._gap
         self._left = max(0, (self._w - total_w) // 2)
 
     def _slot_rect(self, idx: int) -> Tuple[int, int, int, int]:
-        x = self._left + self._gap + idx * (self._tile + self._gap)
-        y = self._top
+        col = idx % self._cols
+        row = idx // self._cols
+        x = self._left + self._gap + col * (self._tile + self._gap)
+        # Extra vertical room for name + difficulty lines under each tile
+        row_step = self._tile + 24  # tile + text area
+        y = self._top + row * row_step
         return x, y, self._tile, self._tile
 
     def _center_text(self, x: int, w: int, y: int, text: str, col: int) -> None:
@@ -88,6 +93,9 @@ class LevelSelectScene:
 
     def draw(self) -> None:
         pyxel.cls(1)
+
+        self._center_text(150, 10, 4, "T I M E    L O O P", 12)
+        self._center_text(150, 10, 12, "SELECT YOUR LEVEL", 5)
 
         for i, entry in enumerate(self._entries):
             meta = entry.factory()
