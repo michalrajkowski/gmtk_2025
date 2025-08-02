@@ -11,7 +11,8 @@ class LevelBase(ABC):
     difficulty: int = 1
     start_room: str = "A"
     completed: bool = False
-    max_cursors: int = 10  # NEW: default lives/cursors
+    max_cursors: int = 10
+    loop_seconds: int = 5
 
     @abstractmethod
     def reset_level(self) -> None: ...

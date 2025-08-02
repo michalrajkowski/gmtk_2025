@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Callable, Final, List, Tuple, Dict
 
 import pyxel
+import math
 
 from game.core.effects import Effects
 from game.core.timeline import GhostSample, TimelineManager
@@ -22,6 +23,8 @@ class GameplayScene:
     NAV_GAP: Final[int] = 4
     NAV_PAD_X: Final[int] = 4
     NAV_PAD_Y: Final[int] = 3
+
+    NUMBER_OF_CIRCLES: Final[int] = 100
 
     def __init__(
         self,
@@ -66,6 +69,12 @@ class GameplayScene:
 
         self._nav_rects: Dict[str, Tuple[int, int, int, int]] = {}
 
+        # Overlays (no pause)
+        self._rewind_frames_left = 0
+        self._rewind_total_frames = int(0.5 * self._fps)  # 0.5 sec
+        self._time_boost_frames = 0
+        self._time_boost_total = self._fps  # 1.0 sec
+
         # Start first loop (consumes a cursor)
         self._consume_and_start_new_loop()
 
@@ -88,9 +97,12 @@ class GameplayScene:
             self._timelines.reset_all()
             self._level.reset_level()
             self._cursors_left = self._max_cursors
-        # Consume a cursor and begin loop
+
+        # Consume a cursor, start loop core, and arm overlays (no pause)
         self._cursors_left -= 1
         self._start_new_loop_core()
+        self._rewind_frames_left = self._rewind_total_frames
+        self._time_boost_frames = self._time_boost_total
 
     def _commit_and_start_next(self) -> None:
         self._timelines.end_run()
@@ -121,8 +133,7 @@ class GameplayScene:
             self._nav_rects[key] = (x, y, w, h)
             x += w + self.NAV_GAP
 
-        # Right-aligned labels: time + cursors
-        # (store as rects for consistent look; not clickable)
+        # Right-aligned labels: time + cursors (not clickable)
         time_txt = self._format_time_label()
         cur_txt = self._format_cursors_label()
         cur_w = self._measure_btn(cur_txt)
@@ -134,17 +145,26 @@ class GameplayScene:
         self._nav_rects["time"] = (time_x, y, time_w, h)
         self._nav_rects["cursors"] = (cur_x, y, cur_w, h)
 
+    def _display_secs_left(self) -> float:
+        # Visual ramp 0 → full for the first second; gameplay continues normally.
+        if self._time_boost_frames > 0:
+            t = 1.0 - (self._time_boost_frames / max(1, self._time_boost_total))
+            return (
+                getattr(self._level, "loop_seconds", self._loop_frames / self._fps) * t
+            )
+        # Normal countdown
+        return max(0.0, (self._loop_frames - self._render_tick) / self._fps)
+
     def _time_color(self) -> int:
-        secs_left = max(0.0, (self._loop_frames - self._render_tick) / self._fps)
-        if secs_left <= 3.0:
+        secs_left = self._display_secs_left()
+        if secs_left <= 1.0:
             return 8  # red
-        if secs_left <= 5.0:
+        if secs_left <= 3.0:
             return 10  # yellow
         return 7  # white
 
     def _format_time_label(self) -> str:
-        secs_left = max(0.0, (self._loop_frames - self._render_tick) / self._fps)
-        return f"Time: {secs_left:0.1f}s"
+        return f"Time: {self._display_secs_left():0.1f}s"
 
     def _cursors_color(self) -> int:
         return 8 if self._cursors_left == 0 else 7
@@ -244,6 +264,12 @@ class GameplayScene:
             if self._tick >= self._loop_frames:
                 self._commit_and_start_next()
             return
+
+        # Overlays: decrement timers (NO pause)
+        if self._rewind_frames_left > 0:
+            self._rewind_frames_left -= 1
+        if self._time_boost_frames > 0:
+            self._time_boost_frames -= 1
 
         # Buttons: press + hold
         left_p = bool(pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT))
@@ -355,3 +381,35 @@ class GameplayScene:
             int(self._mouse_eff_x), int(self._mouse_eff_y), int(7), int(0)
         )
         self._draw_nav()
+
+        # --- Overlays on top (ring follows current mouse) ---
+        if self._rewind_frames_left > 0:
+            prog = 1.0 - (self._rewind_frames_left / max(1, self._rewind_total_frames))
+            self._draw_rewind_ring(int(self._mouse_eff_x), int(self._mouse_eff_y), prog)
+
+    def _draw_rewind_ring(self, cx: int, cy: int, progress: float) -> None:
+        """
+        Dotted rewind ring:
+        - draws filled, overlapping 10px-diameter circles along a radius
+        - draws only the first N dots based on 'progress' in [0..1]
+        - smoothness controlled by NUMBER_OF_CIRCLES
+        """
+        if progress <= 0.0:
+            return
+        progress = min(1.0, progress)
+
+        R = 12  # distance of ring from cursor
+        DOT_DIAM = 2
+        DOT_R = DOT_DIAM // 2
+        NUM = max(1, int(self.NUMBER_OF_CIRCLES))
+
+        # How many dots to show (ceil so first dot appears immediately)
+        shown = max(1, min(NUM, int(math.ceil(progress * NUM))))
+
+        # Start at top (-90°) and go clockwise
+        start_angle = -math.pi / 2.0
+        for i in range(shown):
+            theta = start_angle + (2.0 * math.pi) * (i / NUM)
+            x = cx + int(round(R * math.cos(theta)))
+            y = cy + int(round(R * math.sin(theta)))
+            pyxel.circ(x, y, DOT_R, 7)  # filled white dot

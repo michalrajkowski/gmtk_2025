@@ -12,6 +12,7 @@ class LevelPads(LevelBase):
     difficulty: int = 1
     start_room: str = "A"
     max_cursors = 5
+    loop_seconds: int = 10
 
     PAD_W: Final[int] = 36
     PAD_H: Final[int] = 24

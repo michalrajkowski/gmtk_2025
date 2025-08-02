@@ -68,7 +68,7 @@ class Game:
             width=WIDTH,
             height=HEIGHT,
             fps=FPS,
-            loop_seconds=LOOP_SECONDS,
+            loop_seconds=getattr(level, "loop_seconds", LOOP_SECONDS),
             exit_to_menu=self._show_menu,
             on_level_completed=self._mark_completed_and_finish,
         )

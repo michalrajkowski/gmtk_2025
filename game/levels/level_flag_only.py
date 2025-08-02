@@ -14,7 +14,7 @@ class LevelFlagOnly(LevelBase):
     max_cursors = 1
 
     def __init__(self) -> None:
-        self._flag = Flag(x=120, y=80, w=24, h=24)
+        self._flag = Flag(x=300 // 2 - 16, y=200 // 2, w=24, h=24)
         # Wire completion callback
         self._flag.on_finish = self._mark_complete
 

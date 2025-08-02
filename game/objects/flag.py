@@ -14,7 +14,7 @@ class Flag(LevelObject):
     h: int
     color: int = 10  # yellow/golden
     border: int = 7
-    label: str = "FLAG"
+    label: str = "click"
     on_finish: Optional[Callable[[], None]] = None
 
     def reset(self) -> None:
@@ -34,4 +34,4 @@ class Flag(LevelObject):
         pyxel.rectb(self.x, self.y, self.w, self.h, self.border)
         tw = len(self.label) * 4
         tx = self.x + (self.w - tw) // 2
-        pyxel.text(tx, self.y - 8, self.label, 7)
+        pyxel.text(tx, self.y + 9, self.label, 7)
