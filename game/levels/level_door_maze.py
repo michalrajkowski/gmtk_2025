@@ -28,7 +28,9 @@ class LevelDoorMaze(LevelBase):
 
     def __init__(self) -> None:
         # Where traps send the player back in Room A
-        print("init!")
+        self._saved_palette: list[int] | None = None
+        self._pal_applied: bool = False
+
         self._start_spawn: Tuple[int, int] = (150, 160)  # screen center-ish under nav
 
         # Up-arrow (default Door.pattern) and a down-arrow (reversed)
@@ -216,7 +218,11 @@ class LevelDoorMaze(LevelBase):
         return None
 
     def draw_room(self, room_id: str) -> None:
-        # set the color of current room flor:
+        if room_id == "C_t2":
+            self._apply_room_palette()
+        else:
+            self._restore_palette_if_needed()
+
         if room_id == "A":
             pyxel.cls(1)
         if room_id == "B" or room_id[:2] == "A_":
@@ -248,3 +254,23 @@ class LevelDoorMaze(LevelBase):
 
         for obj in self._rooms.get(room_id, []):
             obj.draw()
+
+    def _apply_room_palette(self) -> None:
+        if self._pal_applied:
+            return
+        self._saved_palette = pyxel.colors.to_list()
+        custom = self._saved_palette.copy()
+
+        custom[12] = 0x000000
+        # custom[11] = 0xA9C1FF
+        custom[2] = 0x8B4852
+        custom[3] = 0xA9C1FF
+
+        pyxel.colors.from_list(custom)
+        self._pal_applied = True
+
+    def _restore_palette_if_needed(self) -> None:
+        if self._pal_applied and self._saved_palette is not None:
+            pyxel.colors.from_list(self._saved_palette)
+        self._pal_applied = False
+        self._saved_palette = None

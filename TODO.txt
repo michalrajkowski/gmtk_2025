@@ -1,0 +1,15 @@
+Bigger screen frame:
+- make the screen slightly bigger? 360x360?
+
+Sprite rendering:
+- use simple shapes but for some things also use the sprites
+- Simple shapes:
+    - wall
+    - button?
+    - door?
+    - laser/red wall (kills on touch?)
+
+- add menu selection / level selection
+
+-  mouse/cursor shape?
+-

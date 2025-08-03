@@ -1,0 +1,2606 @@
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/core/cursor.py ===
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Optional, Tuple
+
+
+@dataclass(slots=True)
+class CursorCtx:
+    room: str
+    offset_x: int = 0
+    offset_y: int = 0
+
+
+@dataclass(slots=True)
+class CursorEvent:
+    # If set, the cursor switches to this room
+    room: Optional[str] = None
+    # If set, the cursor teleports to this absolute position (window coords)
+    teleport_to: Optional[Tuple[int, int]] = None
+
+
+def apply_event(ctx: CursorCtx, event: CursorEvent, raw_x: int, raw_y: int) -> None:
+    if event.room is not None:
+        ctx.room = event.room
+    if event.teleport_to is not None:
+        tx, ty = event.teleport_to
+        # keep using recorded raw positions, but adjust with an offset so the
+        # rendered/interaction position snaps to the teleport target
+        ctx.offset_x = tx - raw_x
+        ctx.offset_y = ty - raw_y
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/core/effects.py ===
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List
+
+import pyxel
+
+
+@dataclass(slots=True)
+class Ripple:
+    x: int
+    y: int
+    age: int = 0
+    max_age: int = 8
+    max_radius: int = 12
+    color: int = 7  # draw as a ring (no alpha in Pyxel)
+
+    def update(self) -> bool:
+        self.age += 1
+        return self.age < self.max_age
+
+    def draw(self) -> None:
+        r = int(self.max_radius * self.age / self.max_age)
+        if r > 0:
+            pyxel.circb(self.x, self.y, r, self.color)
+
+
+class Effects:
+    """Lightweight VFX manager (background layer)."""
+
+    def __init__(self) -> None:
+        self._ripples: List[Ripple] = []
+
+    def add_click(self, x: int, y: int, color: int) -> None:
+        self._ripples.append(Ripple(x, y, age=0, max_age=8, max_radius=12, color=color))
+
+    def update(self) -> None:
+        self._ripples = [r for r in self._ripples if r.update()]
+
+    def draw(self) -> None:
+        for r in self._ripples:
+            r.draw()
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/core/scene.py ===
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+
+
+class Scene(ABC):
+    @abstractmethod
+    def update(self) -> None: ...
+    @abstractmethod
+    def draw(self) -> None: ...
+    def on_enter(self) -> None:  # optional hooks
+        return None
+
+    def on_exit(self) -> None:
+        return None
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/core/timeline.py ===
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Final, List, Optional, Tuple
+
+
+@dataclass(frozen=True, slots=True)
+class FrameRecord:
+    x: int
+    y: int
+    left_p: bool
+    right_p: bool
+    left_h: bool
+    right_h: bool
+
+
+@dataclass(slots=True)
+class GhostSample:
+    x: int
+    y: int
+    left_p: bool
+    right_p: bool
+    left_h: bool
+    right_h: bool
+    color: int
+
+
+class Timeline:
+    def __init__(self, max_frames: int) -> None:
+        self.max_frames: int = max_frames
+        self.frames: List[FrameRecord] = []
+
+    def record(
+        self, x: int, y: int, left_p: bool, right_p: bool, left_h: bool, right_h: bool
+    ) -> None:
+        if len(self.frames) < self.max_frames:
+            self.frames.append(FrameRecord(x, y, left_p, right_p, left_h, right_h))
+
+    def sample(self, frame_index: int) -> Optional[FrameRecord]:
+        if 0 <= frame_index < len(self.frames):
+            return self.frames[frame_index]
+        return None
+
+
+TIMELINE = Timeline
+
+
+class TimelineManager:
+    _GHOST_COLORS: Final[tuple[int, ...]] = (12, 10, 11, 14, 8)
+
+    def __init__(self, max_frames: int) -> None:
+        self.max_frames: int = max_frames
+        self.past_runs: List[TIMELINE] = []
+        self._current: Optional[Timeline] = None
+        self.player_pos: Tuple[int, int] = (80, 60)
+
+    def start_run(self) -> None:
+        self._current = Timeline(self.max_frames)
+
+    def end_run(self) -> None:
+        if self._current is not None:
+            self.past_runs.append(self._current)
+        self._current = None
+
+    def discard_run(self) -> None:
+        self._current = None
+
+    def reset_all(self) -> None:
+        self.past_runs.clear()
+        self._current = None
+        self.player_pos = (80, 60)
+
+    def record_frame(
+        self, x: int, y: int, left_p: bool, right_p: bool, left_h: bool, right_h: bool
+    ) -> None:
+        self.player_pos = (x, y)
+        if self._current is not None:
+            self._current.record(x, y, left_p, right_p, left_h, right_h)
+
+    def ghosts_for_frame(self, frame_index: int) -> List[GhostSample]:
+        samples: List[GhostSample] = []
+        for idx, tl in enumerate(self.past_runs):
+            fr: Optional[FrameRecord] = tl.sample(frame_index)
+            if fr is None:
+                continue
+            color: int = self._GHOST_COLORS[idx % len(self._GHOST_COLORS)]
+            samples.append(
+                GhostSample(
+                    fr.x, fr.y, fr.left_p, fr.right_p, fr.left_h, fr.right_h, color
+                )
+            )
+        return samples
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/entities/mouse.py ===
+# Reserved for future split of Player/Ghost behaviors (kept minimal for now).
+from __future__ import annotations
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/__init__.py ===
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/levels/level_base.py ===
+from __future__ import annotations
+from abc import ABC, abstractmethod
+from typing import Optional
+
+from game.core.cursor import CursorEvent
+from game.objects.base import Which, Action
+
+
+class LevelBase(ABC):
+    name: str = "Level"
+    difficulty: int = 1
+    start_room: str = "A"
+    completed: bool = False
+    max_cursors: int = 10
+    loop_seconds: int = 10
+
+    @abstractmethod
+    def reset_level(self) -> None: ...
+    @abstractmethod
+    def on_loop_start(self) -> None: ...
+
+    # Per-cursor interaction in a specified room; may spawn objects internally.
+    @abstractmethod
+    def interact(
+        self, which: Which, action: Action, x: int, y: int, room_id: str
+    ) -> Optional[CursorEvent]: ...
+
+    # Draw ONLY the given room
+    @abstractmethod
+    def draw_room(self, room_id: str) -> None: ...
+
+    def set_active_actor(self, actor_id: int) -> None:
+        """Called just before interact() for a given actor (player=-1, ghosts=0..)."""
+        self._active_actor_id = actor_id  # type: ignore[attr-defined]
+
+    def on_actor_frame(self, actor_id: int, x: int, y: int, room_id: str) -> None:
+        """Called every frame for every actor with its effective position & room."""
+        return None
+
+    def draw_room_overlay(self, room_id: str) -> None:
+        """Draw extra elements that should appear above everything else (e.g., carried items)."""
+        return None
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/levels/level_button_lock.py ===
+from __future__ import annotations
+from typing import Optional
+
+from game.levels.level_base import LevelBase
+from game.core.cursor import CursorEvent
+from game.objects.base import Which, Action
+from game.objects.flag import Flag
+from game.objects.locked_wall import LockedWall
+from game.objects.button import Button
+
+
+class LevelButtonLock(LevelBase):
+    name: str = "Hold Button!"
+    difficulty: int = 1
+    start_room: str = "A"
+    max_cursors: int = 2
+    loop_seconds: int = 10
+
+    def __init__(self) -> None:
+        # leave space for the top nav bar (y >= 24)
+        self.button = Button(x=52, y=92, w=0, h=0, radius=10)  # hold to open
+        self.wall = LockedWall(x=120, y=80, w=24, h=24, is_open=False)
+        self.flag = Flag(x=120, y=80, w=24, h=24)
+
+        # completion wiring
+        self.flag.on_finish = self._finish
+
+    def _finish(self) -> None:
+        self.completed = True
+
+    # --- LevelBase ---
+    def reset_level(self) -> None:
+        self.completed = False
+        self.wall.reset()
+        self.flag.reset()
+        self.button.reset()
+
+    def on_loop_start(self) -> None:
+        # keep per-level state across loops (nothing special here)
+        pass
+
+    def interact(
+        self, which: Which, action: Action, x: int, y: int, room_id: str
+    ) -> Optional[CursorEvent]:
+        # 1) Update button (lit=True while held inside)
+        self.button.handle_input(which, action, x, y)
+
+        # 2) Open/close wall immediately based on current hold state
+        self.wall.is_open = self.button.lit
+
+        # 3) Route click: wall blocks flag when closed, otherwise flag is clickable
+        if not self.wall.is_open:
+            # absorbs clicks; returns nothing
+            self.wall.handle_input(which, action, x, y)
+        else:
+            self.flag.handle_input(which, action, x, y)
+
+        return None
+
+    def draw_room(self, room_id: str) -> None:
+        # Ensure visual matches current input state this frame
+        self.wall.is_open = self.button.lit
+
+        # Draw in this order so button.reset (inside draw) doesn't affect wall this frame
+        if self.wall.is_open:
+            self.flag.draw()
+        else:
+            self.wall.draw()
+
+        self.button.draw()  # Button.draw() resets .lit to False for next frame
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/levels/level_door_maze.py ===
+from __future__ import annotations
+from typing import Dict, List, Optional, Tuple
+
+import pyxel
+
+from game.levels.level_base import LevelBase
+from game.core.cursor import CursorEvent
+from game.objects.base import LevelObject, Which, Action
+from game.objects.door import Door
+from game.objects.flag import Flag
+from game.objects.box import Box
+
+
+class LevelDoorMaze(LevelBase):
+    """
+    Room A: 4 doors -> 3 wrong send to trap rooms (single bottom door with down arrow,
+             returns to start of A), 1 correct to Room B.
+    Room B: same pattern -> 1 correct to Room C.
+    Room C: same pattern -> 1 correct to F (final).
+    Room F: Box(100 clicks) -> reveals Flag.
+    """
+
+    name: str = "Door Maze"
+    difficulty: int = 2
+    start_room: str = "A"
+    max_cursors: int = 10
+    loop_seconds: int = 10
+
+    def __init__(self) -> None:
+        # Where traps send the player back in Room A
+        self._saved_palette: list[int] | None = None
+        self._pal_applied: bool = False
+
+        self._start_spawn: Tuple[int, int] = (150, 160)  # screen center-ish under nav
+
+        # Up-arrow (default Door.pattern) and a down-arrow (reversed)
+        dummy = Door(x=0, y=0, w=0, h=0, target_room="A")
+        self._up_pat = dummy.pattern
+        self._down_pat = tuple(reversed(self._up_pat))
+
+        self._chill_bank = 2
+        self._chill_u, self._chill_v = 0, 0
+        self._chill_w, self._chill_h = 128 * 2, 86 * 2  # <-- set to actual image size
+        self._chill_x, self._chill_y = 10, 30  # where to draw in room "C_t2"
+
+        pyxel.images[self._chill_bank].load(  # type: ignore
+            self._chill_u, self._chill_v, "assets/chill_bill_small.png"
+        )
+
+        # Build rooms
+        self._rooms: Dict[str, List[LevelObject]] = {}
+
+        # --- Room A ---
+        self._rooms["A"] = [
+            # positions chosen to fit 300x200 canvas (nav ~16px high)
+            Door(x=40, y=56, w=24, h=24, target_room="A_t1", color=9),  # wrong -> trap
+            Door(x=136, y=28, w=24, h=24, target_room="A_t2", color=9),  # correct -> B
+            Door(x=232, y=56, w=24, h=24, target_room="B", color=9),  # wrong -> trap
+            Door(
+                x=136, y=120, w=24, h=24, target_room="A_t3", color=9
+            ),  # wrong -> trap
+        ]
+        # Trap rooms returning to A at _start_spawn (with DOWN arrow)
+        self._rooms["A_t1"] = [  # pyright: ignore[reportArgumentType]
+            Door(
+                x=136,
+                y=140,
+                w=24,
+                h=24,
+                target_room="A",
+                pattern=self._down_pat,  # type: ignore
+                color=1,
+            )
+        ]
+        self._rooms["A_t2"] = [  # pyright: ignore[reportArgumentType]
+            Door(
+                x=136,
+                y=140,
+                w=24,
+                h=24,
+                target_room="A",
+                pattern=self._down_pat,  # type: ignore
+                color=1,
+            )
+        ]  # type: ignore[arg-type]
+        self._rooms["A_t3"] = [  # pyright: ignore[reportArgumentType]
+            Door(
+                x=136,
+                y=140,
+                w=24,
+                h=24,
+                target_room="A",
+                pattern=self._down_pat,  # type: ignore
+                color=1,
+            )
+        ]  # type: ignore[arg-type]
+
+        # --- Room B ---
+        self._rooms["B"] = [
+            Door(x=40, y=56, w=24, h=24, target_room="C", color=2),
+            Door(x=136, y=28, w=24, h=24, target_room="B_t1", color=2),  # correct -> C
+            Door(x=232, y=56, w=24, h=24, target_room="B_t2", color=2),
+            Door(x=136, y=120, w=24, h=24, target_room="B_t3", color=2),
+        ]
+        self._rooms["B_t1"] = [  # pyright: ignore[reportArgumentType]
+            Door(
+                x=136,
+                y=140,
+                w=24,
+                h=24,
+                target_room="A",
+                pattern=self._down_pat,  # type: ignore
+                color=1,
+            )
+        ]  # type: ignore[arg-type]
+        self._rooms["B_t2"] = [  # type: ignore
+            Door(
+                x=136,
+                y=140,
+                w=24,
+                h=24,
+                target_room="A",
+                pattern=self._down_pat,  # type: ignore
+                color=1,
+            )
+        ]  # type: ignore[arg-type]
+        self._rooms["B_t3"] = [  # type: ignore
+            Door(
+                x=136,
+                y=140,
+                w=24,
+                h=24,
+                target_room="A",
+                pattern=self._down_pat,  # type: ignore
+                color=1,
+            )
+        ]  # type: ignore[arg-type]
+
+        # --- Room C ---
+        self._rooms["C"] = [
+            Door(x=40, y=56, w=24, h=24, target_room="C_t1", color=12),
+            Door(
+                x=136, y=28, w=24, h=24, target_room="C_t2", color=12
+            ),  # correct -> Final
+            Door(x=232, y=56, w=24, h=24, target_room="F", color=12),
+            Door(x=136, y=120, w=24, h=24, target_room="C_t3", color=12),
+        ]
+        self._rooms["C_t1"] = [  # type: ignore
+            Door(
+                x=136,
+                y=140,
+                w=24,
+                h=24,
+                target_room="A",
+                pattern=self._down_pat,  # type: ignore
+                color=1,
+            )
+        ]  # type: ignore[arg-type]
+        self._rooms["C_t2"] = [  # type: ignore
+            Door(
+                x=136,
+                y=140,
+                w=24,
+                h=24,
+                target_room="A",
+                pattern=self._down_pat,  # type: ignore
+                color=1,
+            )
+        ]  # type: ignore[arg-type]
+        self._rooms["C_t3"] = [  # type: ignore
+            Door(
+                x=136,
+                y=140,
+                w=24,
+                h=24,
+                target_room="A",
+                pattern=self._down_pat,  # type: ignore
+                color=1,
+            )
+        ]  # type: ignore[arg-type]
+
+        # --- Final room F: Box → Flag ---
+        self.box = Box(x=136, y=72, w=24, h=24, clicks_needed=100, color=3, border=7)
+        self.flag = Flag(x=136, y=72, w=24, h=24)
+        self.flag.on_finish = self._finish
+        self._rooms["F"] = []  # drawn via custom logic below
+
+    def _finish(self) -> None:
+        self.completed = True
+
+    # --- LevelBase API ---
+    def reset_level(self) -> None:
+        self.completed = False
+        self.box.reset()
+        self.flag.reset()
+
+    def on_loop_start(self) -> None:
+        # nothing special
+        pass
+
+    def interact(
+        self, which: Which, action: Action, x: int, y: int, room_id: str
+    ) -> Optional[CursorEvent]:
+        # Final room: box first, then flag becomes active when destroyed
+        if room_id == "F":
+            self.box.handle_input(which, action, x, y)
+            if self.box.destroyed:
+                self.flag.handle_input(which, action, x, y)
+            return None
+
+        # Other rooms: pass click to each object; return the first room change
+        for obj in list(self._rooms.get(room_id, [])):
+            spawned, evt = obj.handle_input(which, action, x, y)
+            if spawned is not None:
+                self._rooms[room_id].append(spawned)
+            if evt is not None:
+                return evt
+        return None
+
+    def draw_room(self, room_id: str) -> None:
+        if room_id == "C_t2":
+            self._apply_room_palette()
+        else:
+            self._restore_palette_if_needed()
+
+        if room_id == "A":
+            pyxel.cls(1)
+        if room_id == "B" or room_id[:2] == "A_":
+            pyxel.cls(9)
+        if room_id == "C" or room_id[:2] == "B_":
+            pyxel.cls(2)
+        if room_id == "F" or room_id[:2] == "C_":
+            pyxel.cls(12)
+
+        if room_id == "C_t2":
+            pyxel.blt(
+                self._chill_x,
+                self._chill_y,
+                self._chill_bank,
+                self._chill_u,
+                self._chill_v,
+                self._chill_w,
+                self._chill_h,
+                0,  # colkey: treat palette color 0 as transparent (adjust if needed)
+            )
+
+        if room_id == "F":
+            # Draw box until destroyed; then draw flag
+            if not self.box.destroyed:
+                self.box.draw()
+            else:
+                self.flag.draw()
+            return
+
+        for obj in self._rooms.get(room_id, []):
+            obj.draw()
+
+    def _apply_room_palette(self) -> None:
+        if self._pal_applied:
+            return
+        self._saved_palette = pyxel.colors.to_list()
+        custom = self._saved_palette.copy()
+
+        custom[12] = 0x000000
+        custom[5] = 0x19959c
+        custom[11] = 0xa9C1ff
+        custom[3] = 0x7696de
+
+
+        pyxel.colors.from_list(custom)
+        self._pal_applied = True
+
+    def _restore_palette_if_needed(self) -> None:
+        if self._pal_applied and self._saved_palette is not None:
+            pyxel.colors.from_list(self._saved_palette)
+        self._pal_applied = False
+        self._saved_palette = None
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/levels/level_first_room_button.py ===
+from __future__ import annotations
+from typing import Optional
+
+from game.levels.level_base import LevelBase
+from game.core.cursor import CursorEvent
+from game.objects.base import Which, Action
+from game.objects.button import Button
+from game.objects.locked_wall import LockedWall
+from game.objects.flag import Flag
+from game.objects.door import Door
+
+
+class LevelFirstRoomButton(LevelBase):
+    name: str = "Rooms+Door"
+    difficulty: int = 1
+    start_room: str = "A"
+    max_cursors: int = 3
+    loop_seconds: int = 10
+
+    def __init__(self) -> None:
+        # --- Room A layout (leave space for nav at y>=16) ---
+        # Left: Button A (hold) -> opens left wall -> reveals Door to room B
+        self.button_a = Button(x=34, y=104, w=0, h=0, radius=9)
+        self.wall_left = LockedWall(x=34, y=64, w=24, h=24, is_open=False)
+        self.door_left = Door(x=34, y=64, w=24, h=24, target_room="B")
+
+        # Right: wall covers Flag; opened by Button B in room B
+        self.wall_right = LockedWall(x=140, y=64, w=24, h=24, is_open=False)
+        self.flag_right = Flag(x=140, y=64, w=24, h=24)
+        self.flag_right.on_finish = self._finish
+
+        # --- Room B layout ---
+        # Only Button B (hold) -> opens right wall in room A
+        self.button_b = Button(x=64, y=96, w=0, h=0, radius=10)
+
+    def _finish(self) -> None:
+        self.completed = True
+
+    # Optional: per-frame prep so hold states are frame-accurate across rooms
+    def begin_frame(self) -> None:
+        # Clear 'lit' so any hold this frame must set it again via interact()
+        self.button_a.lit = False
+        self.button_b.lit = False
+
+    # --- LevelBase ---
+    def reset_level(self) -> None:
+        self.completed = False
+        self.wall_left.reset()
+        self.wall_right.reset()
+        self.flag_right.reset()
+        self.button_a.reset()
+        self.button_b.reset()
+
+    def on_loop_start(self) -> None:
+        # Persist walls as closed at the start of each loop
+        self.wall_left.is_open = False
+        self.wall_right.is_open = False
+
+    def interact(
+        self, which: Which, action: Action, x: int, y: int, room_id: str
+    ) -> Optional[CursorEvent]:
+        # Room A logic
+        if room_id == "A":
+            # Update Button A
+            self.button_a.handle_input(which, action, x, y)
+            # Left wall follows button A hold
+            self.wall_left.is_open = self.button_a.lit
+
+            # If open, the Door Left can be clicked to enter room B
+            if self.wall_left.is_open:
+                spawned, evt = self.door_left.handle_input(which, action, x, y)
+                if evt is not None:
+                    return evt
+
+            # Right side: opened by Button B (from room B) this frame
+            # (button_b.lit is set by room B interactions)
+            self.wall_right.is_open = self.button_b.lit
+            if self.wall_right.is_open:
+                self.flag_right.handle_input(which, action, x, y)
+            else:
+                self.wall_right.handle_input(which, action, x, y)
+
+            return None
+
+        # Room B logic
+        if room_id == "B":
+            # Button B controls right wall in Room A
+            self.button_b.handle_input(which, action, x, y)
+            return None
+
+        return None
+
+    def draw_room(self, room_id: str) -> None:
+        if room_id == "A":
+            # Left: wall or door depending on current button A hold
+            if self.button_a.lit:
+                self.door_left.draw()
+            else:
+                self.wall_left.draw()
+
+            # Right: wall or flag depending on button B hold (cross-room)
+            if self.button_b.lit:
+                self.flag_right.draw()
+            else:
+                self.wall_right.draw()
+
+            self.button_a.draw()  # sets button_a.lit = False for next frame
+
+        elif room_id == "B":
+            self.button_b.draw()  # sets button_b.lit = False for next frame
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/levels/level_flag_only.py ===
+from __future__ import annotations
+from typing import Optional
+
+from game.levels.level_base import LevelBase
+from game.objects.base import Which, Action
+from game.core.cursor import CursorEvent
+from game.objects.flag import Flag
+
+
+class LevelFlagOnly(LevelBase):
+    name: str = "Intro"
+    difficulty: int = 0
+    start_room: str = "A"
+    max_cursors = 1
+    loop_seconds: int = 10
+
+    def __init__(self) -> None:
+        self._flag = Flag(x=300 // 2 - 16, y=200 // 2, w=24, h=24)
+        # Wire completion callback
+        self._flag.on_finish = self._mark_complete
+
+    def _mark_complete(self) -> None:
+        self.completed = True
+
+    def reset_level(self) -> None:
+        self.completed = False
+        self._flag.reset()
+
+    def on_loop_start(self) -> None:
+        # Nothing to reset per loop
+        pass
+
+    def interact(
+        self, which: Which, action: Action, x: int, y: int, room_id: str
+    ) -> Optional[CursorEvent]:
+        _, evt = self._flag.handle_input(which, action, x, y)
+        return evt
+
+    def draw_room(self, room_id: str) -> None:
+        self._flag.draw()
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/levels/level_four_hold_lock.py ===
+from __future__ import annotations
+from typing import Optional, List
+
+from game.levels.level_base import LevelBase
+from game.core.cursor import CursorEvent
+from game.objects.base import Which, Action
+from game.objects.flag import Flag
+from game.objects.locked_wall import LockedWall
+from game.objects.button import Button
+
+import pyxel
+
+
+class LevelFourHoldLock(LevelBase):
+    name: str = "4-Hold Door"
+    difficulty: int = 1
+    start_room: str = "A"
+    max_cursors: int = 6
+    loop_seconds: int = 12
+
+    def __init__(self) -> None:
+        # Leave room for nav (y >= ~20)
+        self.buttons: List[Button] = [
+            Button(x=40, y=64, w=0, h=0, radius=8),
+            Button(x=70, y=64, w=0, h=0, radius=8),
+            Button(x=40, y=104, w=0, h=0, radius=8),
+            Button(x=70, y=104, w=0, h=0, radius=8),
+        ]
+        self.wall = LockedWall(x=150, y=80, w=24, h=24, is_open=False)
+        self.flag = Flag(x=150, y=80, w=24, h=24)
+        self.flag.on_finish = self._finish
+
+    def _finish(self) -> None:
+        self.completed = True
+
+    # --- LevelBase ---
+    def reset_level(self) -> None:
+        self.completed = False
+        for b in self.buttons:
+            b.reset()
+        self.wall.reset()
+        self.flag.reset()
+
+    def on_loop_start(self) -> None:
+        # keep state across loops; per-frame hold will control the wall
+        pass
+
+    def _all_held(self) -> bool:
+        return all(b.lit for b in self.buttons)
+
+    def interact(
+        self, which: Which, action: Action, x: int, y: int, room_id: str
+    ) -> Optional[CursorEvent]:
+        # Update buttons first (Button.lit is true while held inside)
+        for b in self.buttons:
+            b.handle_input(which, action, x, y)
+
+        # Open door only if all are held this frame
+        self.wall.is_open = self._all_held()
+
+        # Route click: wall blocks flag if closed
+        if self.wall.is_open:
+            self.flag.handle_input(which, action, x, y)
+        else:
+            self.wall.handle_input(which, action, x, y)
+
+        return None
+
+    def draw_room(self, room_id: str) -> None:
+        # Ensure visuals match current state this frame
+        self.wall.is_open = self._all_held()
+
+        if self.wall.is_open:
+            self.flag.draw()
+        else:
+            self.wall.draw()
+
+        # Draw buttons last (note: Button.draw() resets .lit for next frame)
+        for b in self.buttons:
+            b.draw()
+
+        pyxel.text(100, 20, "Press P to finish your loop quicker!", 7)
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/levels/level_keys_demo.py ===
+# game/levels/level_keys_demo.py
+from typing import Dict, List, Optional
+import pyxel
+from game.levels.level_base import LevelBase
+from game.core.cursor import CursorEvent
+from game.objects.base import LevelObject, Which, Action
+from game.objects.pickable import Key
+from game.objects.key_wall import KeyWall
+from game.objects.door import Door
+from game.objects.flag import Flag
+
+KEY_YELLOW = 1
+KEY_RED    = 2
+KEY_GREEN  = 3
+KEY_BLUE   = 4
+
+class LevelKeysDemo(LevelBase):
+    name: str = "Keys"
+    difficulty: int = 2
+    start_room: str = "A"
+    max_cursors: int = 6
+    loop_seconds: int = 15
+
+    def __init__(self) -> None:
+        self._rooms: Dict[str, List[LevelObject]] = {"A": [], "B": [], "C": []}
+
+        # --- Room A: yellow key + KeyWall (opens into a Door -> B) ---
+        self.key_y = Key(x=70, y=110, w=0, h=0, room_id="A", color=9, key_id=KEY_YELLOW)
+        self.wall_y = KeyWall(
+            x=140, y=80, w=24, h=24, target_room="B",
+            required_key=KEY_YELLOW, wall_fill=9
+        )
+        self.wall_y.can_open = self._actor_has_key
+        self._rooms["A"] = [self.wall_y]  # <-- keys are NOT stored in room lists
+
+        # --- Room B: red key + 3 walls ---
+        self.key_r = Key(x=60, y=110, w=0, h=0, room_id="B", color=8, key_id=KEY_RED)
+        self.wall_r = KeyWall(x=220, y=60, w=24, h=24, target_room="C", required_key=KEY_RED,   wall_fill=8)
+        self.wall_g = KeyWall(x=220, y=90, w=24, h=24, target_room="B", required_key=KEY_GREEN, wall_fill=11)
+        self.wall_b = KeyWall(x=220, y=120, w=24, h=24, target_room="B", required_key=KEY_BLUE,  wall_fill=12)
+        for w in (self.wall_r, self.wall_g, self.wall_b):
+            w.can_open = self._actor_has_key
+        self._rooms["B"] = [self.wall_r, self.wall_g, self.wall_b]
+
+        # --- Room C: final flag ---
+        self.flag = Flag(x=150, y=80, w=24, h=24)
+        self.flag.on_finish = self._finish
+        self._rooms["C"] = [self.flag]
+
+        # NEW: global list of pickables that can move between rooms
+        self._pickables: List[Key] = [self.key_y, self.key_r]
+
+    def _finish(self) -> None:
+        self.completed = True
+
+    # ========== inventory helpers ==========
+    def _actor_has_key(self, actor_id: int, key_id: int) -> bool:
+        for k in self._pickables:
+            if k.held_by == actor_id and k.key_id == key_id:
+                return True
+        return False
+
+    def _set_active_actor_on_walls(self, actor_id: int) -> None:
+        for room_objs in self._rooms.values():
+            for obj in room_objs:
+                if isinstance(obj, KeyWall):
+                    obj.set_active_actor(actor_id)
+
+    # ========== LevelBase ==========
+    def reset_level(self) -> None:
+        self.completed = False
+        for objs in self._rooms.values():
+            for obj in objs:
+                obj.reset()
+        # reset pickables to their spawns
+        for k in self._pickables:
+            k.reset()
+
+    def on_loop_start(self) -> None:
+        pass
+
+    def set_active_actor(self, actor_id: int) -> None:
+        super().set_active_actor(actor_id)
+        self._set_active_actor_on_walls(actor_id)
+
+    def on_actor_frame(self, actor_id: int, x: int, y: int, room_id: str) -> None:
+        # Move any carried keys with their owner
+        for k in self._pickables:
+            k.on_actor_frame(actor_id, x, y, room_id)
+
+    def interact(self, which: Which, action: Action, x: int, y: int, room_id: str) -> Optional[CursorEvent]:
+        # 1) keys: click to grab/steal (only those currently in this room)
+        if action == "press":
+            active_id = getattr(self, "_active_actor_id", -999)
+            for k in self._pickables:
+                if k.room_id == room_id and k.try_grab_or_steal(active_id, x, y):
+                    return None  # grabbed/stealed; no scene change this frame
+
+        # 2) walls/doors/flag: handle and append spawns
+        for obj in list(self._rooms.get(room_id, [])):
+            spawned, evt = obj.handle_input(which, action, x, y)
+            if spawned is not None:
+                self._rooms[room_id].append(spawned)
+            if evt is not None:
+                return evt
+        return None
+
+    def draw_room(self, room_id: str) -> None:
+        # base layer (no keys here)
+        if room_id == "B":
+            pyxel.cls(9)
+        elif room_id == "C":
+            pyxel.cls(2)
+        else:
+            pyxel.cls(1)
+
+        for obj in self._rooms.get(room_id, []):
+            obj.draw()
+
+    def draw_room_overlay(self, room_id: str) -> None:
+        # overlay layer: draw keys that are *currently* in this room, on top
+        for k in self._pickables:
+            if k.room_id == room_id:
+                k.draw()
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/levels/level_pads.py ===
+from __future__ import annotations
+from typing import Final, List, Optional
+
+from game.levels.level_base import LevelBase
+from game.core.cursor import CursorEvent
+from game.objects.base import Which, Action
+from game.objects.click_pad import ClickPad
+
+
+class LevelPads(LevelBase):
+    name: str = "Pads"
+    difficulty: int = 1
+    start_room: str = "A"
+    max_cursors = 5
+    loop_seconds: int = 10
+
+    PAD_W: Final[int] = 36
+    PAD_H: Final[int] = 24
+    GAP_X: Final[int] = 12
+    GAP_Y: Final[int] = 12
+
+    def __init__(self) -> None:
+        left = 8
+        top = 24  # leave room for nav bar (16px) + gap
+        w = self.PAD_W
+        h = self.PAD_H
+        gx = self.GAP_X
+        gy = self.GAP_Y
+
+        self.pads: List[ClickPad] = [
+            ClickPad(left, top, w, h, threshold=10, color=3),
+            ClickPad(left + w + gx, top, w, h, threshold=20, color=4),
+            ClickPad(left, top + h + gy, w, h, threshold=30, color=5),
+            ClickPad(left + w + gx, top + h + gy, w, h, threshold=100, color=6),
+        ]
+
+    def interact(
+        self, which: Which, action: Action, x: int, y: int, room_id: str
+    ) -> Optional[CursorEvent]:
+        if action == "press":
+            for p in self.pads:
+                p.handle_click(which, x, y)
+        return None
+
+    def draw_room(self, room_id: str) -> None:
+        for p in self.pads:
+            p.draw()
+
+    def reset_level(self) -> None:
+        for p in self.pads:
+            p.reset()
+
+    def on_loop_start(self) -> None:
+        for p in self.pads:
+            p.reset()
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/levels/level_rooms_demo.py ===
+from __future__ import annotations
+from typing import Dict, List, Optional
+
+
+from game.levels.level_base import LevelBase
+from game.core.cursor import CursorEvent
+from game.objects.base import LevelObject, Which, Action
+from game.objects.door import Door
+from game.objects.box import Box
+from game.objects.switch import Switch
+from game.objects.button import Button
+
+
+class LevelRoomsDemo(LevelBase):
+    name: str = "MultiRoom"
+    difficulty: int = 2
+    start_room: str = "A"
+    max_cursors = 5
+
+    def __init__(self) -> None:
+        self._rooms: Dict[str, List[LevelObject]] = {"A": [], "B": []}
+
+        # Room A
+        door_to_b = Door(
+            x=120, y=30, w=24, h=24, target_room="B", color=4, label="To B"
+        )
+
+        def spawn_door_from_box() -> LevelObject:
+            return Door(x=40, y=90, w=24, h=24, target_room="B", color=11, label="B!")
+
+        box = Box(
+            x=40,
+            y=90,
+            w=24,
+            h=24,
+            clicks_needed=10,
+            color=3,
+            spawn_door_factory=spawn_door_from_box,
+        )
+        sw = Switch(x=160, y=40, w=16, h=16)
+        btn = Button(x=180, y=80, w=0, h=0, radius=8)
+        self._rooms["A"] = [door_to_b, box, sw, btn]
+
+        # Room B
+        door_to_a = Door(x=40, y=30, w=24, h=24, target_room="A", color=6, label="To A")
+        self._rooms["B"] = [door_to_a]
+
+    def reset_level(self) -> None:
+        # Reset permanent stuff only when the level is reloaded from the menu
+        for objs in self._rooms.values():
+            for obj in objs:
+                obj.reset()
+        self.completed = False
+
+    def on_loop_start(self) -> None:
+        # Keep switch state across loops (do not call reset here)
+        pass
+
+    def interact(
+        self, which: Which, action: Action, x: int, y: int, room_id: str
+    ) -> Optional[CursorEvent]:
+        for obj in list(self._rooms.get(room_id, [])):
+            spawned, evt = obj.handle_input(which, action, x, y)
+            if spawned is not None:
+                self._rooms[room_id].append(spawned)
+            if evt is not None:
+                return evt
+        return None
+
+    def draw_room(self, room_id: str) -> None:
+        for obj in self._rooms.get(room_id, []):
+            obj.draw()
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/levels/level_switch_lock.py ===
+from __future__ import annotations
+from typing import Optional
+
+from game.levels.level_base import LevelBase
+from game.core.cursor import CursorEvent
+from game.objects.base import Which, Action
+from game.objects.flag import Flag
+from game.objects.locked_wall import LockedWall
+from game.objects.toggle_switch import ToggleSwitch
+
+
+class LevelSwitchLock(LevelBase):
+    name: str = "Switch"
+    difficulty: int = 1
+    start_room: str = "A"
+    max_cursors: int = 1
+    loop_seconds: int = 10
+
+    def __init__(self) -> None:
+        # Positions (leave some space for your nav bar at y=0..16)
+        self.switch = ToggleSwitch(x=40, y=60, w=16, h=16, is_on=False)
+        self.wall = LockedWall(x=120, y=60, w=24, h=24, is_open=False)
+        self.flag = Flag(x=120, y=60, w=24, h=24)
+
+        # Wire switch → wall
+        self.switch.on_toggle = self.wall.set_open
+        # Mark completion when flag is clicked
+        self.flag.on_finish = self._finish
+
+    def _finish(self) -> None:
+        self.completed = True
+
+    # --- LevelBase ---
+    def reset_level(self) -> None:
+        self.completed = False
+        self.switch.reset()
+        self.wall.reset()
+        self.flag.reset()
+
+    def on_loop_start(self) -> None:
+        # Keep state across loops (do nothing) OR reset per loop if you prefer.
+        pass
+
+    def interact(
+        self, which: Which, action: Action, x: int, y: int, room_id: str
+    ) -> Optional[CursorEvent]:
+        # 1) Switch always clickable
+        self.switch.handle_input(which, action, x, y)
+
+        # 2) If wall is closed and was clicked, it absorbs the click (blocks the flag)
+        self.wall.handle_input(which, action, x, y)
+
+        # 3) Flag only works when the wall is open (visible & clickable)
+        if self.wall.is_open:
+            self.flag.handle_input(which, action, x, y)
+
+        return None
+
+    def draw_room(self, room_id: str) -> None:
+        self.switch.draw()
+        if self.wall.is_open:
+            self.flag.draw()
+        else:
+            self.wall.draw()
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/__main__.py ===
+# game/__main__.py
+from __future__ import annotations
+import os
+import sys
+
+# Add the parent of this file's dir so "import game.*" works after unpack
+APP_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if APP_ROOT not in sys.path:
+    sys.path.insert(0, APP_ROOT)
+
+from game.main import run  # noqa: E402
+
+if __name__ == "__main__":
+    run()
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/main.py ===
+from __future__ import annotations
+from typing import Final, Dict
+import pyxel
+
+from game.levels.level_base import LevelBase
+from game.levels.level_flag_only import LevelFlagOnly
+from game.levels.level_pads import LevelPads
+from game.levels.level_rooms_demo import LevelRoomsDemo
+from game.scenes.level_select import LevelEntry, LevelSelectScene
+from game.scenes.gameplay import GameplayScene
+from game.scenes.level_finished import LevelFinishedScene
+from game.levels.level_switch_lock import LevelSwitchLock
+from game.levels.level_button_lock import LevelButtonLock
+from game.levels.level_four_hold_lock import LevelFourHoldLock
+from game.levels.level_first_room_button import LevelFirstRoomButton
+from game.levels.level_door_maze import LevelDoorMaze
+from game.levels.level_keys_demo import LevelKeysDemo
+
+
+WIDTH: Final[int] = 300
+HEIGHT: Final[int] = 200
+FPS: Final[int] = 30
+LOOP_SECONDS: Final[int] = 20
+TITLE: Final[str] = "Loop Mouse (Demo)"
+
+
+def _draw_pointer(x: int, y: int, fill: int, outline: int) -> None:
+    SQUARE_EDGE = 20
+    x1, y1 = x + (SQUARE_EDGE * 0.25), y + int(SQUARE_EDGE * 0.75)
+    x2, y2 = x, y
+    x3, y3 = x + (SQUARE_EDGE * 0.75), y + (SQUARE_EDGE * 0.25)
+    pyxel.tri(x1, y1, x2, y2, x3, y3, fill)
+    pyxel.line(x1, y1, x2, y2, outline)
+    pyxel.line(x2, y2, x3, y3, outline)
+    pyxel.line(x3, y3, x1, y1, outline)
+
+
+class Game:
+    def __init__(self) -> None:
+        pyxel.init(WIDTH, HEIGHT, title=TITLE, fps=FPS)
+        pyxel.mouse(False)
+
+        self._entries = [
+            LevelEntry(factory=LevelFlagOnly),
+            LevelEntry(factory=LevelSwitchLock),
+            LevelEntry(factory=LevelButtonLock),
+            LevelEntry(factory=LevelFourHoldLock),
+            LevelEntry(factory=LevelFirstRoomButton),
+            LevelEntry(factory=LevelDoorMaze),
+            LevelEntry(factory=LevelKeysDemo),
+            # LevelEntry(factory=LevelPads),
+            # LevelEntry(factory=LevelRoomsDemo),
+        ]
+        self._completed: Dict[str, bool] = {}
+        self._show_menu()
+
+    def _is_completed(self, name: str) -> bool:
+        return self._completed.get(name, False)
+
+    def _mark_completed_and_finish(self, level_name: str) -> None:
+        self._completed[level_name] = True
+        # show "level finished" screen, then return to menu
+        self._scene = LevelFinishedScene(level_name, on_done=self._show_menu)
+
+    def _show_menu(self) -> None:
+        self._scene = LevelSelectScene(
+            entries=self._entries,
+            start_level=self._start_level,  # type: ignore
+            draw_pointer=_draw_pointer,
+            width=WIDTH,
+            height=HEIGHT,
+            is_completed=self._is_completed,
+        )
+
+    def _start_level(self, level: LevelBase) -> None:
+        # Reset the level when entering from menu
+        level.reset_level()
+        self._scene = GameplayScene(
+            level=level,
+            draw_pointer=_draw_pointer,
+            width=WIDTH,
+            height=HEIGHT,
+            fps=FPS,
+            loop_seconds=getattr(level, "loop_seconds", LOOP_SECONDS),
+            exit_to_menu=self._show_menu,
+            on_level_completed=self._mark_completed_and_finish,
+        )
+
+    def update(self) -> None:
+        getattr(self._scene, "update")()
+
+    def draw(self) -> None:
+        getattr(self._scene, "draw")()
+
+
+def run() -> None:
+    game = Game()
+    pyxel.run(game.update, game.draw)
+
+
+if __name__ == "__main__":
+    run()
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/objects/base.py ===
+from __future__ import annotations
+from abc import ABC, abstractmethod
+from typing import Literal, Optional, Tuple
+
+from game.core.cursor import CursorEvent
+
+Which = Literal["L", "R"]
+Action = Literal["press", "hold"]
+
+
+class LevelObject(ABC):
+    x: int
+    y: int
+    w: int
+    h: int
+
+    @abstractmethod
+    def reset(self) -> None: ...
+
+    # Returns: (spawned_object, cursor_event)
+    def handle_input(
+        self, which: Which, action: Action, px: int, py: int
+    ) -> Tuple[Optional["LevelObject"], Optional[CursorEvent]]:
+        return None, None
+
+    @abstractmethod
+    def draw(self) -> None: ...
+
+    def contains(self, px: int, py: int) -> bool:
+        return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/objects/box.py ===
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Callable, Optional
+
+import pyxel
+from game.objects.base import LevelObject, Which, Action
+
+
+@dataclass(slots=True)
+class Box(LevelObject):
+    x: int
+    y: int
+    w: int
+    h: int
+    clicks_needed: int
+    color: int = 3
+    border: int = 7
+    spawn_door_factory: Optional[Callable[[], LevelObject]] = None
+
+    clicks: int = 0
+    destroyed: bool = False
+
+    def reset(self) -> None:
+        self.clicks = 0
+        self.destroyed = False
+
+    def handle_input(self, which: Which, action: Action, px: int, py: int):
+        if action != "press":
+            return None, None
+        if self.destroyed or not self.contains(px, py):
+            return None, None
+        self.clicks += 1
+        if self.clicks >= self.clicks_needed:
+            self.destroyed = True
+            if self.spawn_door_factory is not None:
+                return self.spawn_door_factory(), None
+        return None, None
+
+    def draw(self) -> None:
+        if self.destroyed:
+            pyxel.rect(self.x, self.y, self.w, self.h, 0)
+            pyxel.rectb(self.x, self.y, self.w, self.h, 5)
+            return
+        pyxel.rect(self.x, self.y, self.w, self.h, self.color)
+        pyxel.rectb(self.x, self.y, self.w, self.h, self.border)
+        rem = max(0, self.clicks_needed - self.clicks)
+        txt = str(rem)
+        tw = len(txt) * 4
+        tx = self.x + (self.w - tw) // 2
+        pyxel.text(tx, self.y - 8, txt, 7)
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/objects/button.py ===
+from __future__ import annotations
+from dataclasses import dataclass
+
+import pyxel
+from game.objects.base import LevelObject, Which, Action
+
+
+@dataclass(slots=True)
+class Button(LevelObject):
+    # For consistency with rect base, we store x,y,w,h but treat as circle
+    x: int
+    y: int
+    w: int
+    h: int
+    radius: int
+    lit: bool = False
+    color_off: int = 8  # red
+    color_on: int = 11  # green
+    border: int = 7
+
+    def reset(self) -> None:
+        self.lit = False  # not permanent
+
+    def _contains_circle(self, px: int, py: int) -> bool:
+        cx = self.x + self.radius
+        cy = self.y + self.radius
+        dx = px - cx
+        dy = py - cy
+        return dx * dx + dy * dy <= self.radius * self.radius
+
+    def handle_input(self, which: Which, action: Action, px: int, py: int):
+        # lit while HELD inside
+        if action == "hold" and self._contains_circle(px, py):
+            self.lit = True
+        return None, None
+
+    def draw(self) -> None:
+        cx = self.x + self.radius
+        cy = self.y + self.radius
+        pyxel.circ(cx, cy, self.radius, self.color_on if self.lit else self.color_off)
+        pyxel.circb(cx, cy, self.radius, self.border)
+        # reset lit for next frame (level will call interact again if held)
+        self.lit = False
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/objects/click_pad.py ===
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Callable, Literal, Optional
+
+import pyxel
+
+Which = Literal["L", "R"]
+
+
+@dataclass(slots=True)
+class ClickPad:
+    x: int
+    y: int
+    w: int
+    h: int
+    threshold: int  # total clicks needed
+    color: int = 3  # base fill color
+    border: int = 7  # border color
+    on_click: Optional[Callable[["ClickPad", Which, int, int], None]] = None
+
+    # runtime state
+    count: int = 0  # clicks received this loop
+
+    def reset(self) -> None:
+        """Reset per-loop state (called every new timeline)."""
+        self.count = 0
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.threshold - self.count)
+
+    @property
+    def is_complete(self) -> bool:
+        return self.count >= self.threshold
+
+    def contains(self, px: int, py: int) -> bool:
+        return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h
+
+    def handle_click(self, which: Which, px: int, py: int) -> None:
+        """Respond to a single-frame L/R click. Both decrement progress."""
+        if self.is_complete:
+            return
+        if not self.contains(px, py):
+            return
+        self.count += 1
+        if self.on_click is not None:
+            self.on_click(self, which, px, py)
+
+    def draw(self) -> None:
+        # Completed pads get a brighter fill
+        fill = 11 if self.is_complete else self.color
+        pyxel.rect(self.x, self.y, self.w, self.h, fill)
+        pyxel.rectb(self.x, self.y, self.w, self.h, self.border)
+
+        # Minimal, object-local display: remaining countdown centered above
+        text = str(self.remaining)
+        tw = len(text) * 4  # pyxel.text is 4px per char width
+        tx = self.x + (self.w - tw) // 2
+        ty = self.y - 8
+        pyxel.text(tx, ty, text, 7)
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/objects/door.py ===
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Callable, Optional, Tuple
+
+import pyxel
+from game.core.cursor import CursorEvent
+from game.objects.base import LevelObject, Which, Action
+
+
+@dataclass(slots=True)
+class Door(LevelObject):
+    x: int
+    y: int
+    w: int
+    h: int
+    target_room: str
+    color: int = 9
+    border: int = 7
+    label: str = ""
+    # 6×6 arrow sprite drawn with pset, centered on the door
+    pattern: Tuple[str, str, str, str, str, str] = (
+        "..##..",
+        ".####.",
+        "######",
+        "..##..",
+        "..##..",
+        "..##..",
+    )
+    icon_col: int = 7
+    # Spawn point kept for compat; we currently don't teleport on enter
+    on_enter: Optional[Callable[[str], None]] = None
+
+    def reset(self) -> None:
+        return None
+
+    def handle_input(self, which: Which, action: Action, px: int, py: int):
+        if action != "press":
+            return None, None
+        if not self.contains(px, py):
+            return None, None
+        # Only change room; do not teleport pointer
+        return None, CursorEvent(room=self.target_room, teleport_to=None)
+
+    def draw(self) -> None:
+        # Door body
+        pyxel.rect(self.x, self.y, self.w, self.h, self.color)
+        pyxel.rectb(self.x, self.y, self.w, self.h, self.border)
+
+        # Centered arrow icon (pixel-by-pixel)
+        ih = len(self.pattern)
+        iw = len(self.pattern[0]) if ih > 0 else 0
+        ox = self.x + (self.w - iw) // 2
+        oy = self.y + (self.h - ih) // 2
+        for j, row in enumerate(self.pattern):
+            for i, ch in enumerate(row):
+                if ch == "#":
+                    pyxel.pset(ox + i, oy + j, self.icon_col)
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/objects/flag.py ===
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Callable, Optional
+
+import pyxel
+from game.objects.base import LevelObject, Which, Action
+
+
+@dataclass(slots=True)
+class Flag(LevelObject):
+    x: int
+    y: int
+    w: int
+    h: int
+    color: int = 10  # yellow/golden
+    border: int = 7
+    label: str = "click"
+    on_finish: Optional[Callable[[], None]] = None
+
+    def reset(self) -> None:
+        pass
+
+    def handle_input(self, which: Which, action: Action, px: int, py: int):
+        if action != "press":
+            return None, None
+        if not self.contains(px, py):
+            return None, None
+        if self.on_finish:
+            self.on_finish()
+        return None, None
+
+    def draw(self) -> None:
+        pyxel.rect(self.x, self.y, self.w, self.h, self.color)
+        pyxel.rectb(self.x, self.y, self.w, self.h, self.border)
+        tw = len(self.label) * 4
+        tx = self.x + (self.w - tw) // 2
+        pyxel.text(tx, self.y + 9, self.label, 7)
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/objects/__init__.py ===
+from __future__ import annotations
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/objects/key_door.py ===
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Callable, Optional, Tuple
+
+import pyxel
+from game.core.cursor import CursorEvent
+from game.objects.base import LevelObject, Which, Action
+
+@dataclass(slots=True)
+class KeyDoor(LevelObject):
+    x: int
+    y: int
+    w: int
+    h: int
+    target_room: str
+    required_key: int           # key_id needed
+    color: int = 9              # door color (match key theme)
+    border: int = 7
+    icon_col: int = 7
+    is_open: bool = False
+
+    # callback supplied by the level to ask: does actor_id hold required_key?
+    can_open: Optional[Callable[[int, int], bool]] = None
+    # level supplies set_active_actor; we read it through a setter the level calls:
+    _active_actor_id: Optional[int] = None  # set by level before interact
+
+    def reset(self) -> None:
+        self.is_open = False
+
+    def set_active_actor(self, actor_id: int) -> None:
+        self._active_actor_id = actor_id
+
+    def handle_input(self, which: Which, action: Action, px: int, py: int):
+        if not self.contains(px, py):
+            return None, None
+
+        # If closed, a press with the right key opens it
+        if not self.is_open and action == "press":
+            if self.can_open and self._active_actor_id is not None:
+                if self.can_open(self._active_actor_id, self.required_key):
+                    self.is_open = True
+
+        # If open and pressed, change room
+        if self.is_open and action == "press":
+            return None, CursorEvent(room=self.target_room, teleport_to=None)
+
+        return None, None
+
+    def draw(self) -> None:
+        pyxel.rect(self.x, self.y, self.w, self.h, self.color if not self.is_open else 1)
+        pyxel.rectb(self.x, self.y, self.w, self.h, self.border)
+
+        # small arrow icon (like your Door) centered
+        pattern = (
+            "..##..",
+            ".####.",
+            "######",
+            "..##..",
+            "..##..",
+            "..##..",
+        )
+        ih = len(pattern); iw = len(pattern[0])
+        ox = self.x + (self.w - iw) // 2
+        oy = self.y + (self.h - ih) // 2
+        col = self.icon_col if not self.is_open else 5
+        for j, row in enumerate(pattern):
+            for i, ch in enumerate(row):
+                if ch == "#":
+                    pyxel.pset(ox + i, oy + j, col)
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/objects/key_wall.py ===
+# game/objects/key_wall.py
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Callable, Optional
+
+from game.objects.base import LevelObject, Which, Action
+from game.objects.locked_wall import LockedWall
+from game.objects.door import Door
+
+@dataclass(slots=True)
+class KeyWall(LevelObject):
+    x: int
+    y: int
+    w: int
+    h: int
+    target_room: str
+    required_key: int
+    wall_fill: int = 5
+    wall_border: int = 7
+    icon_col: int = 7
+
+    # supplied by the level: can this actor open with required_key?
+    can_open: Optional[Callable[[int, int], bool]] = None
+
+    # set by the level before interact()
+    _active_actor_id: Optional[int] = None
+
+    # internal wall
+    _wall: LockedWall = None  # type: ignore[assignment]
+    _broken: bool = False
+
+    def __post_init__(self) -> None:
+        self._wall = LockedWall(
+            x=self.x, y=self.y, w=self.w, h=self.h,
+            is_open=False, fill=self.wall_fill, border=self.wall_border, icon_col=self.icon_col
+        )
+        self._broken = False
+
+    def reset(self) -> None:
+        self._broken = False
+        self._wall.is_open = False
+
+    def set_active_actor(self, actor_id: int) -> None:
+        self._active_actor_id = actor_id
+
+    def handle_input(self, which: Which, action: Action, px: int, py: int):
+        # If not broken yet, the closed wall absorbs clicks unless actor holds the key.
+        if not self._broken:
+            if action == "press" and self._wall.contains(px, py):
+                if self.can_open and self._active_actor_id is not None:
+                    if self.can_open(self._active_actor_id, self.required_key):
+                        # Break wall now and spawn a Door in its place
+                        self._broken = True
+                        self._wall.is_open = True
+                        door = Door(
+                            x=self.x, y=self.y, w=self.w, h=self.h,
+                            target_room=self.target_room, color=self.wall_fill, border=self.wall_border
+                        )
+                        return door, None
+                # Otherwise, blocked
+                return None, None
+            return None, None
+
+        # Already broken: nothing more to do; the spawned Door will handle transitions.
+        return None, None
+
+    def draw(self) -> None:
+        # Draw closed/locked wall until it is broken (then invisible)
+        if not self._broken:
+            self._wall.draw()
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/objects/locked_wall.py ===
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import List
+
+import pyxel
+from game.objects.base import LevelObject, Which, Action
+
+
+@dataclass(slots=True)
+class LockedWall(LevelObject):
+    x: int
+    y: int
+    w: int
+    h: int
+    is_open: bool = False
+    fill: int = 5  # gray fill
+    border: int = 7  # white border
+    icon_col: int = 7  # lock icon color
+
+    def reset(self) -> None:
+        self.is_open = False
+
+    def set_open(self, open_: bool) -> None:
+        self.is_open = open_
+
+    def handle_input(self, which: Which, action: Action, px: int, py: int):
+        # Not interactable itself. If closed and clicked, it simply absorbs the click.
+        if not self.is_open and self.contains(px, py):
+            return None, None
+        return None, None
+
+    def draw(self) -> None:
+        if self.is_open:
+            return  # invisible when open
+        pyxel.rect(self.x, self.y, self.w, self.h, self.fill)
+        pyxel.rectb(self.x, self.y, self.w, self.h, self.border)
+        self._draw_lock_icon()
+
+    def _draw_lock_icon(self) -> None:
+        """
+        Tiny padlock drawn pixel-by-pixel using pset.
+        Designed for ~24x24 wall; icon is ~9x10 pixels centered.
+        '#' pixels will be plotted in icon_col.
+        """
+        pattern: List[str] = [
+            "...######...",
+            "..#......#..",  # shackle top
+            ".#........#.",
+            "############",
+            "####....####",  # body top
+            "####....####",  # keyhole column
+            "#####..#####",
+            "#####..#####",
+            "############",  # body bottom
+        ]
+        iw, ih = len(pattern[0]), len(pattern)
+        cx = self.x + self.w // 2
+        cy = self.y + self.h // 2
+        ox = cx - iw // 2
+        oy = cy - ih // 2
+        for j, row in enumerate(pattern):
+            for i, ch in enumerate(row):
+                if ch == "#":
+                    pyxel.pset(ox + i, oy + j, self.icon_col)
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/objects/pickable.py ===
+# game/objects/pickable.py
+from dataclasses import dataclass
+from typing import Optional, Tuple, List, ClassVar
+import pyxel
+from game.objects.base import LevelObject, Which, Action
+
+@dataclass(slots=True)
+class Pickable(LevelObject):
+    x: int
+    y: int
+    w: int
+    h: int
+    room_id: str
+    color: int = 9
+    border: int = 7
+    held_by: Optional[int] = None
+    follow_offset: Tuple[int, int] = (0, -10)
+
+    # NEW: spawn snapshot
+    spawn_x: int = 0
+    spawn_y: int = 0
+    spawn_room: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.spawn_room:
+            self.spawn_x = self.x
+            self.spawn_y = self.y
+            self.spawn_room = self.room_id
+
+    def reset(self) -> None:
+        # Drop item back to its spawn point
+        self.held_by = None
+        self.x = self.spawn_x
+        self.y = self.spawn_y
+        self.room_id = self.spawn_room
+
+    def on_actor_frame(self, actor_id: int, ax: int, ay: int, room_id: str) -> None:
+        if self.held_by == actor_id:
+            dx, dy = self.follow_offset
+            self.x, self.y = ax + dx, ay + dy
+            self.room_id = room_id
+
+    def try_grab_or_steal(self, actor_id: int, px: int, py: int) -> bool:
+        if self.contains(px, py):
+            self.held_by = actor_id
+            return True
+        return False
+
+    def handle_input(self, which: Which, action: Action, px: int, py: int):
+        return None, None
+
+    def draw(self) -> None:
+        pass
+
+
+@dataclass(slots=True)
+class Key(Pickable):
+    key_id: int = 1        # e.g., 1=yellow, 2=red, 3=green, 4=blue
+    tooth_col: int = 7
+
+    PATTERN: ClassVar[Tuple[str,str,str]] = (
+         ".#####........",
+         ".#...########.",
+         ".#####...#..#.",
+     )
+    SCALE: ClassVar[int] = 3
+
+    def __post_init__(self) -> None:
+        # derive size if missing so hit-test works
+        if self.w <= 0 or self.h <= 0:
+            self.w = len(self.PATTERN[0]) * self.SCALE
+            self.h = len(self.PATTERN) * self.SCALE
+        Pickable.__post_init__(self)
+
+    def contains(self, px: int, py: int) -> bool:
+        lx, ly = px - self.x, py - self.y
+        if lx < 0 or ly < 0:
+            return False
+        i = lx // self.SCALE
+        j = ly // self.SCALE
+        if 0 <= j < len(self.PATTERN) and 0 <= i < len(self.PATTERN[0]):
+            return self.PATTERN[j][i] == "#"
+        return False
+
+    def draw(self) -> None:
+        col = self.color
+        for j, row in enumerate(self.PATTERN):
+            for i, ch in enumerate(row):
+                if ch == "#":
+                    px = self.x + i * self.SCALE
+                    py = self.y + j * self.SCALE
+                    pyxel.rect(px, py, self.SCALE, self.SCALE, col)
+
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/objects/switch.py ===
+from __future__ import annotations
+from dataclasses import dataclass
+
+import pyxel
+from game.objects.base import LevelObject, Which, Action
+
+
+@dataclass(slots=True)
+class Switch(LevelObject):
+    x: int
+    y: int
+    w: int
+    h: int
+    flipped: bool = False
+    color_off: int = 5  # gray
+    color_on: int = 11  # bright green
+    border: int = 7
+
+    def reset(self) -> None:
+        # permanent within the level session: do not reset on loop
+        pass
+
+    def handle_input(self, which: Which, action: Action, px: int, py: int):
+        if action != "press":
+            return None, None
+        if not self.contains(px, py):
+            return None, None
+        self.flipped = True
+        return None, None
+
+    def draw(self) -> None:
+        fill = self.color_on if self.flipped else self.color_off
+        pyxel.rect(self.x, self.y, self.w, self.h, fill)
+        pyxel.rectb(self.x, self.y, self.w, self.h, self.border)
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/objects/toggle_switch.py ===
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Callable, Optional, Tuple
+
+import pyxel
+from game.objects.base import LevelObject, Which, Action
+from game.core.cursor import CursorEvent
+
+
+@dataclass(slots=True)
+class ToggleSwitch(LevelObject):
+    x: int
+    y: int
+    w: int
+    h: int
+    is_on: bool = False
+    color_on: int = 11  # green
+    color_off: int = 8  # red
+    border: int = 7
+    on_toggle: Optional[Callable[[bool], None]] = None
+
+    def reset(self) -> None:
+        self.is_on = False
+
+    def handle_input(
+        self, which: Which, action: Action, px: int, py: int
+    ) -> Tuple[Optional["LevelObject"], Optional[CursorEvent]]:
+        if action != "press" or not self.contains(px, py):
+            return None, None
+        self.is_on = not self.is_on
+        if self.on_toggle:
+            self.on_toggle(self.is_on)
+        return None, None
+
+    def draw(self) -> None:
+        fill = self.color_on if self.is_on else self.color_off
+        pyxel.rect(self.x, self.y, self.w, self.h, fill)
+        pyxel.rectb(self.x, self.y, self.w, self.h, self.border)
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/scenes/gameplay.py ===
+from __future__ import annotations
+from typing import Callable, Final, List, Tuple, Dict
+
+import pyxel
+import math
+
+from game.core.effects import Effects
+from game.core.timeline import GhostSample, TimelineManager
+from game.core.cursor import CursorCtx, apply_event
+from game.levels.level_base import LevelBase
+
+
+class GameplayScene:
+    # Key mappings
+    KEY_QUIT: Final[int] = pyxel.KEY_Q
+    KEY_MENU: Final[int] = pyxel.KEY_L
+    KEY_RESTART: Final[int] = pyxel.KEY_R
+    KEY_PASS: Final[int] = pyxel.KEY_P
+    KEY_COMMIT_ALT: Final[int] = pyxel.KEY_RETURN
+    KEY_BACK_ALT: Final[int] = pyxel.KEY_ESCAPE
+
+    NAV_H: Final[int] = 16
+    NAV_GAP: Final[int] = 4
+    NAV_PAD_X: Final[int] = 4
+    NAV_PAD_Y: Final[int] = 3
+
+    NUMBER_OF_CIRCLES: Final[int] = 100
+
+    def __init__(
+        self,
+        level: LevelBase,
+        draw_pointer: Callable[[int, int, int, int], None],
+        width: int,
+        height: int,
+        fps: int,
+        loop_seconds: int,
+        exit_to_menu: Callable[[], None] | None = None,
+        on_level_completed: Callable[[str], None] | None = None,
+    ) -> None:
+        self._level = level
+        self._draw_pointer = draw_pointer
+        self._w: Final[int] = width
+        self._h: Final[int] = height
+
+        self._fps: Final[int] = fps
+        self._loop_frames: Final[int] = loop_seconds * fps
+
+        self._timelines = TimelineManager(max_frames=self._loop_frames)
+        self._fx_ghost, self._fx_player = Effects(), Effects()
+        self._tick = 0
+        self._render_tick = 0
+
+        # Snapshots
+        self._mouse_raw_x = 0
+        self._mouse_raw_y = 0
+        self._mouse_eff_x = 0
+        self._mouse_eff_y = 0
+
+        # Per-cursor contexts
+        self._player_ctx: CursorCtx = CursorCtx(room=getattr(level, "start_room", "A"))
+        self._ghost_ctxs: List[CursorCtx] = []
+
+        # Cursors (lives)
+        self._max_cursors: int = getattr(level, "max_cursors", 10)
+        self._cursors_left: int = self._max_cursors
+
+        self._exit_to_menu = exit_to_menu
+        self._on_level_completed = on_level_completed
+
+        self._nav_rects: Dict[str, Tuple[int, int, int, int]] = {}
+
+        # Overlays (no pause)
+        self._rewind_frames_left = 0
+        self._rewind_total_frames = int(0.5 * self._fps)  # 0.5 sec
+        self._time_boost_frames = 0
+        self._time_boost_total = self._fps  # 1.0 sec
+
+        # Start first loop (consumes a cursor)
+        self._consume_and_start_new_loop()
+
+    # ----- lifecycle -----
+    def _restart_full(self) -> None:
+        """Completely restart the level: reset level state, ghosts, and lives."""
+        self._timelines.reset_all()
+        self._level.reset_level()
+        self._cursors_left = self._max_cursors
+        self._consume_and_start_new_loop()  # starts fresh loop and arms overlays
+
+    def _start_new_loop_core(self) -> None:
+        self._level.on_loop_start()
+        self._timelines.start_run()
+        self._fx_ghost = Effects()
+        self._fx_player = Effects()
+        self._tick = 0
+        self._render_tick = 0
+        self._player_ctx = CursorCtx(room=getattr(self._level, "start_room", "A"))
+        self._ghost_ctxs = [
+            CursorCtx(room=self._player_ctx.room) for _ in self._timelines.past_runs
+        ]
+
+    def _consume_and_start_new_loop(self) -> None:
+        # If out of cursors, reset level & timelines and refill
+        if self._cursors_left <= 0:
+            self._timelines.reset_all()
+            self._level.reset_level()
+            self._cursors_left = self._max_cursors
+
+        # Consume a cursor, start loop core, and arm overlays (no pause)
+        self._cursors_left -= 1
+        self._start_new_loop_core()
+        self._rewind_frames_left = self._rewind_total_frames
+        self._time_boost_frames = self._time_boost_total
+
+    def _commit_and_start_next(self) -> None:
+        self._timelines.end_run()
+        self._consume_and_start_new_loop()
+
+    def _restart_discard_current(self) -> None:
+        self._timelines.discard_run()
+        self._consume_and_start_new_loop()
+
+    # ----- nav -----
+    def _measure_btn(self, label: str) -> int:
+        return len(label) * 4 + self.NAV_PAD_X * 2 + 2
+
+    def _layout_nav(self) -> None:
+        x = self.NAV_GAP
+        y = 0
+        h = self.NAV_H
+        self._nav_rects.clear()
+
+        labels = {
+            "levels": "[L]evels",
+            "name": f"{getattr(self._level, 'name', 'Level')}",
+            "restart": "[R]estart",
+            "pass": "[P]ass",
+        }
+        for key in ["levels", "name", "restart", "pass"]:
+            w = self._measure_btn(labels[key])
+            self._nav_rects[key] = (x, y, w, h)
+            x += w + self.NAV_GAP
+
+        # Right-aligned labels: time + cursors (not clickable)
+        time_txt = self._format_time_label()
+        cur_txt = self._format_cursors_label()
+        cur_w = self._measure_btn(cur_txt)
+        time_w = self._measure_btn(time_txt)
+
+        cur_x = self._w - self.NAV_GAP - cur_w
+        time_x = cur_x - self.NAV_GAP - time_w
+
+        self._nav_rects["time"] = (time_x, y, time_w, h)
+        self._nav_rects["cursors"] = (cur_x, y, cur_w, h)
+
+    def _display_secs_left(self) -> float:
+        # Visual ramp 0 → full for the first second; gameplay continues normally.
+        if self._time_boost_frames > 0:
+            t = 1.0 - (self._time_boost_frames / max(1, self._time_boost_total))
+            return (
+                getattr(self._level, "loop_seconds", self._loop_frames / self._fps) * t
+            )
+        # Normal countdown
+        return max(0.0, (self._loop_frames - self._render_tick) / self._fps)
+
+    def _time_color(self) -> int:
+        secs_left = self._display_secs_left()
+        if secs_left <= 1.0:
+            return 8  # red
+        if secs_left <= 3.0:
+            return 10  # yellow
+        return 7  # white
+
+    def _format_time_label(self) -> str:
+        return f"Time: {self._display_secs_left():0.1f}s"
+
+    def _cursors_color(self) -> int:
+        return 8 if self._cursors_left == 0 else 7
+
+    def _format_cursors_label(self) -> str:
+        return f"{self._cursors_left + 1}/{self._max_cursors}"
+
+    def _draw_nav(self) -> None:
+        pyxel.rect(0, 0, self._w, self.NAV_H, 0)
+
+        def center_text(x: int, w: int, y: int, txt: str, col: int) -> None:
+            tw = len(txt) * 4
+            tx = x + (w - tw) // 2
+            ty = y + (self.NAV_H - 6) // 2
+            pyxel.text(tx, ty, txt, col)
+
+        labels = {
+            "levels": "[L]evels",
+            "name": f"{getattr(self._level, 'name', 'Level')}",
+            "restart": "[R]estart",
+            "pass": "[P]ass",
+            "time": self._format_time_label(),
+            "cursors": self._format_cursors_label(),
+        }
+        colors = {
+            "levels": 7,
+            "name": 7,
+            "restart": 7,
+            "pass": 7,
+            "time": self._time_color(),
+            "cursors": self._cursors_color(),
+        }
+
+        for key, (x, y, w, h) in self._nav_rects.items():
+            pyxel.rectb(x, y, w, h, 7)
+            center_text(x, w, y, labels[key], colors[key])
+
+    def _handle_nav_click(self, mx: int, my: int) -> bool:
+        if my >= self.NAV_H:
+            return False
+        if pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT):
+            for key, (x, y, w, h) in self._nav_rects.items():
+                if key in ("time", "cursors"):
+                    continue  # not clickable
+                if x <= mx < x + w and y <= my < y + h:
+                    if key == "levels" and self._exit_to_menu:
+                        self._exit_to_menu()
+                        return True
+                    if key == "restart":
+                        self._restart_full()
+                        return True
+                    if key == "pass":
+                        self._commit_and_start_next()
+                        return True
+        return False
+
+    # ----- update/draw -----
+    def update(self) -> None:
+        self._layout_nav()
+
+        # Global keys
+        if pyxel.btnp(self.KEY_QUIT):
+            pyxel.quit()
+            return
+        if self._exit_to_menu and pyxel.btnp(self.KEY_MENU):
+            self._exit_to_menu()
+            return
+        if pyxel.btnp(self.KEY_RESTART):
+            self._restart_full()
+            return
+        if pyxel.btnp(self.KEY_PASS) or pyxel.btnp(self.KEY_COMMIT_ALT):
+            self._commit_and_start_next()
+            return
+        if self._exit_to_menu and pyxel.btnp(self.KEY_BACK_ALT):
+            self._exit_to_menu()
+            return
+        if pyxel.btnp(pyxel.KEY_N):
+            # Hard reset: refill cursors and reset timelines/level
+            self._timelines.reset_all()
+            self._level.reset_level()
+            self._cursors_left = self._max_cursors
+            self._consume_and_start_new_loop()
+            return
+
+        # Clamp + snapshot raw
+        mx = max(0, min(self._w - 1, int(pyxel.mouse_x)))
+        my = max(0, min(self._h - 1, int(pyxel.mouse_y)))
+        self._mouse_raw_x, self._mouse_raw_y = mx, my
+
+        # Nav click (consume)
+        if self._handle_nav_click(mx, my):
+            self._timelines.record_frame(mx, my, False, False, False, False)
+            self._fx_ghost.update()
+            self._fx_player.update()
+            self._render_tick = self._tick
+            self._tick += 1
+            if self._tick >= self._loop_frames:
+                self._commit_and_start_next()
+            return
+
+        # Overlays: decrement timers (NO pause)
+        if self._rewind_frames_left > 0:
+            self._rewind_frames_left -= 1
+        if self._time_boost_frames > 0:
+            self._time_boost_frames -= 1
+
+        # Buttons: press + hold
+        left_p = bool(pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT))
+        right_p = bool(pyxel.btnp(pyxel.MOUSE_BUTTON_RIGHT))
+        left_h = bool(pyxel.btn(pyxel.MOUSE_BUTTON_LEFT))
+        right_h = bool(pyxel.btn(pyxel.MOUSE_BUTTON_RIGHT))
+
+        # Record frame (raw)
+        self._timelines.record_frame(mx, my, left_p, right_p, left_h, right_h)
+
+        # --- GHOSTS ---
+        ghosts: List[GhostSample] = self._timelines.ghosts_for_frame(self._tick)
+        while len(self._ghost_ctxs) < len(ghosts):
+            self._ghost_ctxs.append(CursorCtx(room=self._player_ctx.room))
+
+        for idx, g in enumerate(ghosts):
+            ctx = self._ghost_ctxs[idx]
+            gx = max(0, min(self._w - 1, int(g.x) + ctx.offset_x))
+            gy = max(0, min(self._h - 1, int(g.y) + ctx.offset_y))
+
+            # NEW: per-actor frame report
+            self._level.on_actor_frame(idx, gx, gy, ctx.room)
+
+            if (g.left_p or g.right_p) and ctx.room == self._player_ctx.room:
+                self._fx_ghost.add_click(gx, gy, int(g.color))
+
+            # NEW: tell the level who's acting before each interact
+            self._level.set_active_actor(idx)
+            if g.left_p:
+                evt = self._level.interact("L", "press", gx, gy, ctx.room)
+                if evt is not None:
+                    apply_event(ctx, evt, int(g.x), int(g.y))
+            if g.right_p:
+                evt = self._level.interact("R", "press", gx, gy, ctx.room)
+                if evt is not None:
+                    apply_event(ctx, evt, int(g.x), int(g.y))
+            if g.left_h:
+                evt = self._level.interact("L", "hold", gx, gy, ctx.room)
+                if evt is not None:
+                    apply_event(ctx, evt, int(g.x), int(g.y))
+            if g.right_h:
+                evt = self._level.interact("R", "hold", gx, gy, ctx.room)
+                if evt is not None:
+                    apply_event(ctx, evt, int(g.x), int(g.y))
+
+        # --- PLAYER ---
+        px_eff = max(0, min(self._w - 1, mx + self._player_ctx.offset_x))
+        py_eff = max(0, min(self._h - 1, my + self._player_ctx.offset_y))
+        self._mouse_eff_x, self._mouse_eff_y = px_eff, py_eff
+
+        # NEW: per-actor frame report (player id = -1)
+        self._level.on_actor_frame(-1, px_eff, py_eff, self._player_ctx.room)
+
+        if left_p or right_p:
+            self._fx_player.add_click(px_eff, py_eff, 7)
+            self._level.set_active_actor(-1)  # NEW: mark who acts
+            if left_p:
+                evt = self._level.interact("L", "press", px_eff, py_eff, self._player_ctx.room)
+                if evt is not None:
+                    apply_event(self._player_ctx, evt, mx, my)
+            if right_p:
+                evt = self._level.interact("R", "press", px_eff, py_eff, self._player_ctx.room)
+                if evt is not None:
+                    apply_event(self._player_ctx, evt, mx, my)
+
+        self._level.set_active_actor(-1)  # also before holds
+        if left_h:
+            evt = self._level.interact("L", "hold", px_eff, py_eff, self._player_ctx.room)
+            if evt is not None:
+                apply_event(self._player_ctx, evt, mx, my)
+        if right_h:
+            evt = self._level.interact("R", "hold", px_eff, py_eff, self._player_ctx.room)
+            if evt is not None:
+                apply_event(self._player_ctx, evt, mx, my)
+
+        # Update effects
+        self._fx_ghost.update()
+        self._fx_player.update()
+
+        # Completion?
+        if getattr(self._level, "completed", False) and self._on_level_completed:
+            self._on_level_completed(getattr(self._level, "name", "Level"))
+            return
+
+        # Advance
+        self._render_tick = self._tick
+        self._tick += 1
+        if self._tick >= self._loop_frames:
+            self._commit_and_start_next()
+
+    def draw(self) -> None:
+        pyxel.cls(1)
+        self._level.draw_room(self._player_ctx.room)
+        self._fx_ghost.draw()
+
+        ghosts = self._timelines.ghosts_for_frame(self._render_tick)
+        for idx, g in enumerate(ghosts):
+            if idx >= len(self._ghost_ctxs):
+                continue
+            ctx = self._ghost_ctxs[idx]
+            if ctx.room != self._player_ctx.room:
+                continue
+            gx = int(g.x) + ctx.offset_x
+            gy = int(g.y) + ctx.offset_y
+            if 0 <= gx < self._w and 0 <= gy < self._h:
+                self._draw_pointer(int(gx), int(gy), int(g.color), int(0))
+
+        self._fx_player.draw()
+        self._draw_pointer(
+            int(self._mouse_eff_x), int(self._mouse_eff_y), int(7), int(0)
+        )
+        # NEW: top overlays from level (pickables on top)
+        if hasattr(self._level, "draw_room_overlay"):
+            self._level.draw_room_overlay(self._player_ctx.room)
+
+        self._draw_nav()
+
+        # --- Overlays on top (ring follows current mouse) ---
+        if self._rewind_frames_left > 0:
+            prog = 1.0 - (self._rewind_frames_left / max(1, self._rewind_total_frames))
+            self._draw_rewind_ring(int(self._mouse_eff_x), int(self._mouse_eff_y), prog)
+
+    def _draw_rewind_ring(self, cx: int, cy: int, progress: float) -> None:
+        """
+        Dotted rewind ring:
+        - draws filled, overlapping 10px-diameter circles along a radius
+        - draws only the first N dots based on 'progress' in [0..1]
+        - smoothness controlled by NUMBER_OF_CIRCLES
+        """
+        if progress <= 0.0:
+            return
+        progress = min(1.0, progress)
+
+        R = 12  # distance of ring from cursor
+        DOT_DIAM = 2
+        DOT_R = DOT_DIAM // 2
+        NUM = max(1, int(self.NUMBER_OF_CIRCLES))
+
+        # How many dots to show (ceil so first dot appears immediately)
+        shown = max(1, min(NUM, int(math.ceil(progress * NUM))))
+
+        # Start at top (-90°) and go clockwise
+        start_angle = -math.pi / 2.0
+        for i in range(shown):
+            theta = start_angle + (2.0 * math.pi) * (i / NUM)
+            x = cx + int(round(R * math.cos(theta)))
+            y = cy + int(round(R * math.sin(theta)))
+            pyxel.circ(x, y, DOT_R, 7)  # filled white dot
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/scenes/level_finished.py ===
+from __future__ import annotations
+from typing import Callable, Final, List
+import random
+import math
+import pyxel
+
+
+class _Particle:
+    __slots__ = ("x", "y", "vx", "vy", "age", "max_age", "color", "radius")
+
+    def __init__(
+        self,
+        x: float,
+        y: float,
+        vx: float,
+        vy: float,
+        color: int,
+        max_age: int,
+        radius: int,
+    ) -> None:
+        self.x, self.y = x, y
+        self.vx, self.vy = vx, vy
+        self.age = 0
+        self.max_age = max_age
+        self.color = color
+        self.radius = radius
+
+    def update(self) -> bool:
+        # physics: gravity + mild drag for a pleasing arc
+        self.vy += 0.08  # gravity (pull down)
+        self.vx *= 0.995  # slight drag
+        self.vy *= 0.995
+
+        self.x += self.vx
+        self.y += self.vy
+
+        self.age += 1
+        return self.age < self.max_age
+
+    def draw(self) -> None:
+        # shrink over life; switch to pixel at the end for sparkle
+        t = self.age / self.max_age
+        r = max(1, int(self.radius * (1.0 - t)))
+        ix, iy = int(self.x), int(self.y)
+        if 0 <= ix < pyxel.width and 0 <= iy < pyxel.height:
+            if r <= 1:
+                pyxel.pset(ix, iy, self.color)
+            else:
+                pyxel.circ(ix, iy, r, self.color)
+
+
+class LevelFinishedScene:
+    def __init__(self, level_name: str, on_done: Callable[[], None]) -> None:
+        self._name = level_name
+        self._on_done = on_done
+        self._timer = 0
+        self._wait_frames: Final[int] = 600  # ~2s at 30fps
+
+        self._parts: List[_Particle] = []
+        self._spawn_cooldown = 0
+
+    def _spawn_firework(self) -> None:
+        # Pick a random center (keep away from edges a bit)
+        cx = random.randint(24, pyxel.width - 24)
+        cy = random.randint(28, pyxel.height - 24)
+
+        # Base parameters
+        n = random.randint(22, 36)  # number of spokes
+        base_speed = random.uniform(1.3, 2.4)  # initial radial speed
+        max_age = random.randint(22, 34)  # particle lifetime
+        radius0 = random.randint(2, 4)  # initial draw radius
+        palette = [7, 8, 9, 10, 11, 12, 13, 14]
+        base_color = random.choice(palette)
+
+        # Create a circular ring of particles with slight jitter
+        for i in range(n):
+            theta = (2.0 * math.pi * i / n) + random.uniform(-0.06, 0.06)
+            spd = base_speed * random.uniform(0.9, 1.1)
+            vx = spd * math.cos(theta)
+            vy = spd * math.sin(theta)
+            color = base_color if random.random() < 0.7 else random.choice(palette)
+            pr = radius0 if random.random() < 0.75 else max(1, radius0 - 1)
+            self._parts.append(_Particle(cx, cy, vx, vy, color, max_age, pr))
+
+        # Core flash: short-lived bright puff at the center
+        flash_color = random.choice(palette)
+        for _ in range(6):
+            self._parts.append(_Particle(cx, cy, 0.0, 0.0, flash_color, 8, radius0 + 1))
+
+        # Next burst after a short random delay
+        self._spawn_cooldown = random.randint(8, 14)
+
+    def update(self) -> None:
+        self._timer += 1
+
+        # spawn fireworks periodically
+        if self._spawn_cooldown <= 0:
+            self._spawn_firework()
+        else:
+            self._spawn_cooldown -= 1
+
+        # update particles
+        self._parts = [p for p in self._parts if p.update()]
+
+        # exit
+        if (
+            self._timer >= self._wait_frames
+            or pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT)
+            or pyxel.btnp(pyxel.KEY_RETURN)
+        ):
+            self._on_done()
+
+    def draw(self) -> None:
+        pyxel.cls(1)
+
+        # fireworks behind text
+        for p in self._parts:
+            p.draw()
+
+        msg = f"Level '{self._name}' finished!"
+        tw = len(msg) * 4
+        pyxel.text((pyxel.width - tw) // 2, pyxel.height // 2 - 4, msg, 7)
+
+        hint = "Click or Enter to continue"
+        th = len(hint) * 4
+        pyxel.text((pyxel.width - th) // 2, pyxel.height // 2 + 8, hint, 6)
+
+=== /mnt/ssd2/programowanie-projekty/GAME_JAMS/GMTK_2025/game/scenes/level_select.py ===
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Sequence, Tuple, Optional, Type, Callable
+
+import pyxel
+from game.levels.level_base import LevelBase
+
+
+@dataclass(frozen=True)
+class LevelEntry:
+    factory: Type[LevelBase]  # class object (callable to instantiate)
+
+
+class LevelSelectScene:
+    def __init__(
+        self,
+        entries: Sequence[LevelEntry],
+        start_level: Callable[[LevelBase], None],  # <-- fix: function that starts a level instance
+        draw_pointer: Callable[[int, int, int, int], None],
+        width: int,
+        height: int,
+        is_completed: Optional[Callable[[str], bool]] = None,
+    ) -> None:
+        self._entries = list(entries)
+        self._start_level = start_level
+        self._draw_pointer = draw_pointer
+        self._w = width
+        self._h = height
+        self._is_completed = is_completed or (lambda _name: False)
+
+        self._tile = 32
+        self._gap = 16
+        self._top = 24
+        self._cols = 6
+
+        total_w = self._cols * self._tile + (self._cols + 1) * self._gap
+        self._left = max(0, (self._w - total_w) // 2)
+
+    def _slot_rect(self, idx: int) -> Tuple[int, int, int, int]:
+        col = idx % self._cols
+        row = idx // self._cols
+        x = self._left + self._gap + col * (self._tile + self._gap)
+        row_step = self._tile + 24  # tile + text area
+        y = self._top + row * row_step
+        return x, y, self._tile, self._tile
+
+    def _center_text(self, x: int, w: int, y: int, text: str, col: int) -> None:
+        tw = len(text) * 4
+        tx = x + (w - tw) // 2
+        pyxel.text(tx, y, text, col)
+
+    def _draw_difficulty_row(self, x: int, w: int, y: int, diff: int) -> None:
+        # 0: gray gray gray; 1: green gray gray; 2: yellow yellow gray; 3+: red red red
+        if diff <= 0:
+            cols = [5, 5, 5]
+        elif diff == 1:
+            cols = [11, 5, 5]
+        elif diff == 2:
+            cols = [10, 10, 5]
+        else:
+            cols = [8, 8, 8]
+
+        total_w = 20
+        start_x = x + (w - total_w) // 2
+        for i, col in enumerate(cols):
+            px = start_x + i * 8  # 4px char + 4px space
+            pyxel.text(px, y, "O", col)
+
+    def update(self) -> None:
+        if pyxel.btnp(pyxel.KEY_Q):
+            pyxel.quit()
+            return
+
+        mx = max(0, min(self._w - 1, int(pyxel.mouse_x)))
+        my = max(0, min(self._h - 1, int(pyxel.mouse_y)))
+
+        if pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT):
+            for i, entry in enumerate(self._entries):
+                x, y, w, h = self._slot_rect(i)
+                if x <= mx < x + w and y <= my < y + h:
+                    # Instantiate the class and hand the instance to the starter
+                    self._start_level(entry.factory())
+                    return
+
+    def draw(self) -> None:
+        pyxel.cls(1)
+
+        self._center_text(150, 10, 4, "T I M E    L O O P", 12)
+        self._center_text(150, 10, 12, "SELECT YOUR LEVEL", 5)
+
+        for i, entry in enumerate(self._entries):
+            level_cls = entry.factory
+            x, y, w, h = self._slot_rect(i)
+            name = getattr(level_cls, "name", "Level")
+            diff = int(getattr(level_cls, "difficulty", 0))
+            done = self._is_completed(name)
+
+            pyxel.rect(x, y, w, h, 11 if done else 0)
+            pyxel.rectb(x, y, w, h, 7)
+
+            self._center_text(x, w, y + h // 2 - 3, str(i + 1), 7)
+            self._center_text(x, w, y + h + 6, f"{name}", 6)
+
+            # <-- fix: pass the int 'diff' directly
+            self._draw_difficulty_row(x, w, y + h + 12, diff)
+
+        mx = max(0, min(self._w - 1, int(pyxel.mouse_x)))
+        my = max(0, min(self._h - 1, int(pyxel.mouse_y)))
+        self._draw_pointer(int(mx), int(my), int(7), int(0))

@@ -12,11 +12,11 @@ import pyxel
 
 
 class LevelFourHoldLock(LevelBase):
-    name: str = "4-Hold Door"
+    name: str = "Hold Four"
     difficulty: int = 1
     start_room: str = "A"
-    max_cursors: int = 8
-    loop_seconds: int = 20
+    max_cursors: int = 6
+    loop_seconds: int = 12
 
     def __init__(self) -> None:
         # Leave room for nav (y >= ~20)

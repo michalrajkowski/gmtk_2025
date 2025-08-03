@@ -4,8 +4,6 @@ import pyxel
 
 from game.levels.level_base import LevelBase
 from game.levels.level_flag_only import LevelFlagOnly
-from game.levels.level_pads import LevelPads
-from game.levels.level_rooms_demo import LevelRoomsDemo
 from game.scenes.level_select import LevelEntry, LevelSelectScene
 from game.scenes.gameplay import GameplayScene
 from game.scenes.level_finished import LevelFinishedScene
@@ -14,7 +12,12 @@ from game.levels.level_button_lock import LevelButtonLock
 from game.levels.level_four_hold_lock import LevelFourHoldLock
 from game.levels.level_first_room_button import LevelFirstRoomButton
 from game.levels.level_door_maze import LevelDoorMaze
-
+from game.levels.level_keys_demo import LevelKeysDemo
+from game.levels.level_chase import LevelChase
+from game.levels.level_helper import LevelHelper
+from game.levels.level_secret_code import LevelSecretCode
+from game.levels.last_level_loop_keys import LevelLastLoopKeys
+from game.levels.level_big_button_fireworks import LevelBigButtonFireworks
 
 WIDTH: Final[int] = 300
 HEIGHT: Final[int] = 200
@@ -46,8 +49,12 @@ class Game:
             LevelEntry(factory=LevelFourHoldLock),
             LevelEntry(factory=LevelFirstRoomButton),
             LevelEntry(factory=LevelDoorMaze),
-            LevelEntry(factory=LevelPads),
-            LevelEntry(factory=LevelRoomsDemo),
+            LevelEntry(factory=LevelKeysDemo),
+            LevelEntry(factory=LevelChase),
+            LevelEntry(factory=LevelHelper),
+            LevelEntry(factory=LevelSecretCode),
+            LevelEntry(factory=LevelLastLoopKeys),
+            LevelEntry(factory=LevelBigButtonFireworks),
         ]
         self._completed: Dict[str, bool] = {}
         self._show_menu()

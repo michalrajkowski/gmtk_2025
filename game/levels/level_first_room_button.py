@@ -11,10 +11,10 @@ from game.objects.door import Door
 
 
 class LevelFirstRoomButton(LevelBase):
-    name: str = "Rooms+Door"
+    name: str = "A... Door?"
     difficulty: int = 1
     start_room: str = "A"
-    max_cursors: int = 5
+    max_cursors: int = 3
     loop_seconds: int = 10
 
     def __init__(self) -> None:

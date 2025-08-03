@@ -12,7 +12,7 @@ from game.objects.button import Button
 
 
 class LevelRoomsDemo(LevelBase):
-    name: str = "MultiRoom"
+    name: str = "A... Aoor?"
     difficulty: int = 2
     start_room: str = "A"
     max_cursors = 5

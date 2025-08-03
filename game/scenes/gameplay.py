@@ -26,6 +26,12 @@ class GameplayScene:
 
     NUMBER_OF_CIRCLES: Final[int] = 100
 
+    # NEW helper
+    def _maybe_seed_timelines(self):
+        seed = getattr(self._level, "seed_timelines", None)
+        if callable(seed):
+            seed(self._timelines)
+
     def __init__(
         self,
         level: LevelBase,
@@ -46,6 +52,9 @@ class GameplayScene:
         self._loop_frames: Final[int] = loop_seconds * fps
 
         self._timelines = TimelineManager(max_frames=self._loop_frames)
+
+        self._maybe_seed_timelines()
+
         self._fx_ghost, self._fx_player = Effects(), Effects()
         self._tick = 0
         self._render_tick = 0
@@ -77,17 +86,26 @@ class GameplayScene:
 
         # Start first loop (consumes a cursor)
         self._consume_and_start_new_loop()
+        # Provide levels with "loops left" (including current loop)
+        if hasattr(self._level, "set_loops_left_provider"):
+            self._level.set_loops_left_provider(lambda: self._cursors_left + 1)
 
     # ----- lifecycle -----
     def _restart_full(self) -> None:
         """Completely restart the level: reset level state, ghosts, and lives."""
         self._timelines.reset_all()
         self._level.reset_level()
+        self._maybe_seed_timelines()
         self._cursors_left = self._max_cursors
         self._consume_and_start_new_loop()  # starts fresh loop and arms overlays
 
     def _start_new_loop_core(self) -> None:
         self._level.on_loop_start()
+        if (
+            hasattr(self._level, "seed_timelines")
+            and len(self._timelines.past_runs) == 0
+        ):
+            self._level.seed_timelines(self._timelines)
         self._timelines.start_run()
         self._fx_ghost = Effects()
         self._fx_player = Effects()
@@ -252,6 +270,7 @@ class GameplayScene:
             # Hard reset: refill cursors and reset timelines/level
             self._timelines.reset_all()
             self._level.reset_level()
+            self._maybe_seed_timelines()
             self._cursors_left = self._max_cursors
             self._consume_and_start_new_loop()
             return
@@ -297,9 +316,12 @@ class GameplayScene:
             gx = max(0, min(self._w - 1, int(g.x) + ctx.offset_x))
             gy = max(0, min(self._h - 1, int(g.y) + ctx.offset_y))
 
+            # FX only if visible in the same room as the player
             if (g.left_p or g.right_p) and ctx.room == self._player_ctx.room:
                 self._fx_ghost.add_click(gx, gy, int(g.color))
 
+            # Mark the acting ghost and PROCESS INPUTS FIRST (may change ctx.room)
+            self._level.set_active_actor(idx)
             if g.left_p:
                 evt = self._level.interact("L", "press", gx, gy, ctx.room)
                 if evt is not None:
@@ -308,7 +330,6 @@ class GameplayScene:
                 evt = self._level.interact("R", "press", gx, gy, ctx.room)
                 if evt is not None:
                     apply_event(ctx, evt, int(g.x), int(g.y))
-
             if g.left_h:
                 evt = self._level.interact("L", "hold", gx, gy, ctx.room)
                 if evt is not None:
@@ -318,13 +339,17 @@ class GameplayScene:
                 if evt is not None:
                     apply_event(ctx, evt, int(g.x), int(g.y))
 
-        # --- PLAYER ---
+            # NOW report final per-actor frame (after any room change)
+            self._level.on_actor_frame(idx, gx, gy, ctx.room)
+
+            # --- PLAYER ---
         px_eff = max(0, min(self._w - 1, mx + self._player_ctx.offset_x))
         py_eff = max(0, min(self._h - 1, my + self._player_ctx.offset_y))
         self._mouse_eff_x, self._mouse_eff_y = px_eff, py_eff
 
         if left_p or right_p:
             self._fx_player.add_click(px_eff, py_eff, 7)
+            self._level.set_active_actor(-1)
             if left_p:
                 evt = self._level.interact(
                     "L", "press", px_eff, py_eff, self._player_ctx.room
@@ -338,6 +363,7 @@ class GameplayScene:
                 if evt is not None:
                     apply_event(self._player_ctx, evt, mx, my)
 
+        self._level.set_active_actor(-1)
         if left_h:
             evt = self._level.interact(
                 "L", "hold", px_eff, py_eff, self._player_ctx.room
@@ -350,6 +376,9 @@ class GameplayScene:
             )
             if evt is not None:
                 apply_event(self._player_ctx, evt, mx, my)
+
+        # Report AFTER any room changes this frame
+        self._level.on_actor_frame(-1, px_eff, py_eff, self._player_ctx.room)
 
         # Update effects
         self._fx_ghost.update()
@@ -387,6 +416,10 @@ class GameplayScene:
         self._draw_pointer(
             int(self._mouse_eff_x), int(self._mouse_eff_y), int(7), int(0)
         )
+        # NEW: top overlays from level (pickables on top)
+        if hasattr(self._level, "draw_room_overlay"):
+            self._level.draw_room_overlay(self._player_ctx.room)
+
         self._draw_nav()
 
         # --- Overlays on top (ring follows current mouse) ---
