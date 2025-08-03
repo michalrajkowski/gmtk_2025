@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Callable, Sequence, Tuple, Optional
+from typing import Sequence, Tuple, Optional, Type, Callable
 
 import pyxel
 from game.levels.level_base import LevelBase
@@ -8,14 +8,14 @@ from game.levels.level_base import LevelBase
 
 @dataclass(frozen=True)
 class LevelEntry:
-    factory: Callable[[], LevelBase]
+    factory: Type[LevelBase]
 
 
 class LevelSelectScene:
     def __init__(
         self,
         entries: Sequence[LevelEntry],
-        start_level: Callable[[LevelBase], None],
+        start_level: Type[LevelBase],
         draw_pointer: Callable[[int, int, int, int], None],
         width: int,
         height: int,
@@ -88,7 +88,7 @@ class LevelSelectScene:
             for i, entry in enumerate(self._entries):
                 x, y, w, h = self._slot_rect(i)
                 if x <= mx < x + w and y <= my < y + h:
-                    self._start_level(entry.factory())
+                    self._start_level(entry.factory())  # type: ignore
                     return
 
     def draw(self) -> None:
@@ -98,9 +98,11 @@ class LevelSelectScene:
         self._center_text(150, 10, 12, "SELECT YOUR LEVEL", 5)
 
         for i, entry in enumerate(self._entries):
-            meta = entry.factory()
+            level_cls = entry.factory
             x, y, w, h = self._slot_rect(i)
-            done = self._is_completed(meta.name)
+            name = getattr(level_cls, "name", "Level")
+            diff = int(getattr(level_cls, "difficulty", 0))
+            done = self._is_completed(name)
 
             pyxel.rect(x, y, w, h, 11 if done else 0)  # green background if completed
             pyxel.rectb(x, y, w, h, 7)
@@ -109,11 +111,11 @@ class LevelSelectScene:
             self._center_text(x, w, y + h // 2 - 3, str(i + 1), 7)
 
             # Name under the square
-            self._center_text(x, w, y + h + 6, f"{meta.name}", 6)
+            self._center_text(x, w, y + h + 6, f"{name}", 6)
 
             # Difficulty row under the name
             self._draw_difficulty_row(
-                x, w, y + h + 12, int(getattr(meta, "difficulty", 0))
+                x, w, y + h + 12, int(getattr(diff, "difficulty", 0))
             )
 
         # Custom pointer

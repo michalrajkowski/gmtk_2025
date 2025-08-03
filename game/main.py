@@ -12,6 +12,9 @@ from game.scenes.level_finished import LevelFinishedScene
 from game.levels.level_switch_lock import LevelSwitchLock
 from game.levels.level_button_lock import LevelButtonLock
 from game.levels.level_four_hold_lock import LevelFourHoldLock
+from game.levels.level_first_room_button import LevelFirstRoomButton
+from game.levels.level_door_maze import LevelDoorMaze
+
 
 WIDTH: Final[int] = 300
 HEIGHT: Final[int] = 200
@@ -41,6 +44,8 @@ class Game:
             LevelEntry(factory=LevelSwitchLock),
             LevelEntry(factory=LevelButtonLock),
             LevelEntry(factory=LevelFourHoldLock),
+            LevelEntry(factory=LevelFirstRoomButton),
+            LevelEntry(factory=LevelDoorMaze),
             LevelEntry(factory=LevelPads),
             LevelEntry(factory=LevelRoomsDemo),
         ]
@@ -58,7 +63,7 @@ class Game:
     def _show_menu(self) -> None:
         self._scene = LevelSelectScene(
             entries=self._entries,
-            start_level=self._start_level,
+            start_level=self._start_level,  # type: ignore
             draw_pointer=_draw_pointer,
             width=WIDTH,
             height=HEIGHT,
