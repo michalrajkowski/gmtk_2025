@@ -21,7 +21,7 @@ KEY_BLUE = 4
 
 class LevelHelper(LevelBase):
     name: str = "Helper"
-    difficulty: int = 3
+    difficulty: int = 2
     start_room: str = "A"
     max_cursors: int = 4
     loop_seconds: int = 15

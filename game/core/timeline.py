@@ -78,15 +78,33 @@ class TimelineManager:
             self._current.record(x, y, left_p, right_p, left_h, right_h)
 
     def ghosts_for_frame(self, frame_index: int) -> List[GhostSample]:
+        """
+        For each past run, return a GhostSample every frame.
+        - While within the recorded run: replay inputs and position.
+        - After the run ends: keep the ghost at its last position, with no inputs (idle).
+        """
         samples: List[GhostSample] = []
         for idx, tl in enumerate(self.past_runs):
-            fr: Optional[FrameRecord] = tl.sample(frame_index)
-            if fr is None:
-                continue
+            if tl.frames:
+                if 0 <= frame_index < len(tl.frames):
+                    fr = tl.frames[frame_index]
+                    left_p, right_p, left_h, right_h = (
+                        fr.left_p,
+                        fr.right_p,
+                        fr.left_h,
+                        fr.right_h,
+                    )
+                    x, y = fr.x, fr.y
+                else:
+                    # idle at final recorded position, no inputs
+                    fr = tl.frames[-1]
+                    x, y = fr.x, fr.y
+                    left_p = right_p = left_h = right_h = False
+            else:
+                # empty timeline: park at last known player position, no inputs
+                x, y = self.player_pos
+                left_p = right_p = left_h = right_h = False
+
             color: int = self._GHOST_COLORS[idx % len(self._GHOST_COLORS)]
-            samples.append(
-                GhostSample(
-                    fr.x, fr.y, fr.left_p, fr.right_p, fr.left_h, fr.right_h, color
-                )
-            )
+            samples.append(GhostSample(x, y, left_p, right_p, left_h, right_h, color))
         return samples

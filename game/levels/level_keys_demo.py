@@ -117,6 +117,43 @@ class LevelKeysDemo(LevelBase):
             self.key_g,
         ]
 
+        # --- add inside LevelKeysDemo.__init__ after building walls ---
+        # Signatures of doors that KeyWalls spawn (per room)
+        self._wall_door_sigs = {
+            "A": {
+                (
+                    self.wall_y.x,
+                    self.wall_y.y,
+                    self.wall_y.w,
+                    self.wall_y.h,
+                    self.wall_y.target_room,
+                )
+            },
+            "B": {
+                (
+                    self.wall_r.x,
+                    self.wall_r.y,
+                    self.wall_r.w,
+                    self.wall_r.h,
+                    self.wall_r.target_room,
+                ),
+                (
+                    self.wall_g.x,
+                    self.wall_g.y,
+                    self.wall_g.w,
+                    self.wall_g.h,
+                    self.wall_g.target_room,
+                ),
+                (
+                    self.wall_b.x,
+                    self.wall_b.y,
+                    self.wall_b.w,
+                    self.wall_b.h,
+                    self.wall_b.target_room,
+                ),
+            },
+        }
+
     def _finish(self) -> None:
         self.completed = True
 
@@ -144,21 +181,20 @@ class LevelKeysDemo(LevelBase):
     # ===== LevelBase =====
     def reset_level(self) -> None:
         self.completed = False
-        # reset all room objects (re-locks key walls)
         for objs in self._rooms.values():
             for obj in objs:
                 obj.reset()
-        # reset pickables to their spawns
         for p in self._pickables:
             p.reset()
+        self._prune_spawned_doors()  # <-- remove any wall-spawned doors
 
     def on_loop_start(self) -> None:
-        # Ensure doors/walls/keys never carry state between lives
         for objs in self._rooms.values():
             for obj in objs:
                 obj.reset()
         for p in self._pickables:
             p.reset()
+        self._prune_spawned_doors()  # <-- ensure new loop starts locked
 
     def set_active_actor(self, actor_id: int) -> None:
         super().set_active_actor(actor_id)
@@ -206,6 +242,22 @@ class LevelKeysDemo(LevelBase):
                         return None
 
         return None
+
+    # --- add this helper method to LevelKeysDemo ---
+    def _prune_spawned_doors(self) -> None:
+        """Remove doors that were spawned by KeyWalls (so loops re-lock properly)."""
+        for room_id, objs in list(self._rooms.items()):
+            sigs = self._wall_door_sigs.get(room_id, set())
+            if not sigs:
+                continue
+            # keep original 'back' doors (their signatures won't match the wall slots)
+            self._rooms[room_id] = [
+                o
+                for o in objs
+                if not (
+                    isinstance(o, Door) and (o.x, o.y, o.w, o.h, o.target_room) in sigs
+                )
+            ]
 
     def draw_room(self, room_id: str) -> None:
         # Backgrounds: A dark, B normal, others slightly tinted for variety
